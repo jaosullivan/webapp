@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Users Service",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--port", "8001"],
+      "cwd": "${workspaceFolder}/services/users",
+      "env": { "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5432/users" }
+    },
+    {
+      "name": "Orders Service",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--port", "8002"],
+      "cwd": "${workspaceFolder}/services/orders",
+      "env": { "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5432/orders" }
+    },
+    {
+      "name": "Payments Service",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--port", "8003"],
+      "cwd": "${workspaceFolder}/services/payments",
+      "env": { "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5432/payments" }
+    }
+  ]
+}
