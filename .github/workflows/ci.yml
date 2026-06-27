@@ -69,6 +69,7 @@ jobs:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
       matrix:
         include:
           - service: users
@@ -91,13 +92,13 @@ jobs:
 
       - name: Build and push ${{ matrix.service }}
         run: |
-          podman build \
+          docker build \
             -t ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }} \
             -t ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:latest \
             -f ${{ matrix.context }}/Containerfile \
             ${{ matrix.context }}
-          podman push ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
-          podman push ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:latest
+          docker push ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+          docker push ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:latest
 
   # ------------------------------------------------------------------
   # Update the Kustomize production overlay with the new image tags.
