@@ -1,0 +1,50 @@
+name: Bootstrap ArgoCD
+
+# Run this workflow manually once to install ArgoCD on the cluster
+# and register the fullstack Application. After that, all deployments
+# are handled automatically by ArgoCD watching the Git repo.
+#
+# Prerequisites:
+#   - KUBECONFIG secret set in GitHub Actions environment "production"
+#   - Cluster has NGINX ingress controller installed
+
+on:
+  workflow_dispatch:
+    inputs:
+      argocd_version:
+        description: "ArgoCD version to install"
+        required: false
+        default: "v2.12.0"
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+
+      - name: Install ArgoCD
+        run: |
+          kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -n argocd \
+            -f https://raw.githubusercontent.com/argoproj/argo-cd/${{ inputs.argocd_version }}/manifests/install.yaml
+          kubectl rollout status deployment/argocd-server -n argocd --timeout=120s
+
+      - name: Apply AppProject
+        run: kubectl apply -f fullstack/infra/argocd/project.yaml
+
+      - name: Apply Application
+        run: kubectl apply -f fullstack/infra/argocd/apps/fullstack-app.yaml
+
+      - name: Print ArgoCD admin password
+        run: |
+          echo "ArgoCD initial admin password:"
+          kubectl get secret argocd-initial-admin-secret -n argocd \
+            -o jsonpath="{.data.password}" | base64 -d
+          echo ""
+          echo "Port-forward: kubectl port-forward svc/argocd-server -n argocd 8080:443"
