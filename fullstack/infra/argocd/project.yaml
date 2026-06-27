@@ -17,12 +17,9 @@ spec:
     - namespace: argocd
       server: https://kubernetes.default.svc
 
-  # Allow creating Namespace at cluster scope
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
-    - group: networking.k8s.io
-      kind: Ingress
 
   namespaceResourceWhitelist:
     - group: "apps"
@@ -33,3 +30,5 @@ spec:
       kind: ConfigMap
     - group: ""
       kind: PersistentVolumeClaim
+    - group: networking.k8s.io
+      kind: Ingress
