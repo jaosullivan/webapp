@@ -4,35 +4,36 @@ metadata:
   name: fullstack-ingress
   namespace: fullstack
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /api/v1/$2
 spec:
   ingressClassName: nginx
   rules:
     - host: fullstack.local
       http:
         paths:
-          - path: /api/users(/|$)(.*)
+          - path: /api/v1/(auth|users)(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
                 name: users
                 port:
                   number: 8000
-          - path: /api/orders(/|$)(.*)
+          - path: /api/v1/(orders)(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
                 name: orders
                 port:
                   number: 8000
-          - path: /api/payments(/|$)(.*)
+          - path: /api/v1/(payments)(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
                 name: payments
                 port:
                   number: 8000
-          - path: /(/|$)(.*)
+          - path: /(.*)
             pathType: ImplementationSpecific
             backend:
               service:

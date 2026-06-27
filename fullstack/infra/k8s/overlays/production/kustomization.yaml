@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: fullstack
+
+resources:
+  - ../../base/namespace.yaml
+  - ../../base/ingress.yaml
+  - ../../services/users.yaml
+  - ../../services/orders.yaml
+  - ../../services/payments.yaml
+  - ../../services/frontend.yaml
+
+# Image tags are updated here automatically by the CI pipeline (update-manifests job).
+# Do not edit these manually — they will be overwritten on the next push to main.
+images:
+  - name: fullstack/users
+    newName: ghcr.io/jaosullivan/webapp/users
+    newTag: latest
+  - name: fullstack/orders
+    newName: ghcr.io/jaosullivan/webapp/orders
+    newTag: latest
+  - name: fullstack/payments
+    newName: ghcr.io/jaosullivan/webapp/payments
+    newTag: latest
+  - name: fullstack/frontend
+    newName: ghcr.io/jaosullivan/webapp/frontend
+    newTag: latest

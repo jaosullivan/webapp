@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fullstack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: fullstack
+
+  source:
+    repoURL: https://github.com/jaosullivan/webapp
+    targetRevision: main
+    # Kustomize overlay — CI updates image tags here on every push to main
+    path: fullstack/infra/k8s/overlays/production
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fullstack
+
+  syncPolicy:
+    automated:
+      prune: true       # Remove resources deleted from Git
+      selfHeal: true    # Revert out-of-band cluster changes
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+
+  # Notify on health degraded or sync failure
+  revisionHistoryLimit: 5

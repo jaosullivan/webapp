@@ -6,9 +6,11 @@
 
 ## Project Overview
 
-Kubernetes-native full-stack application with three FastAPI microservices, a React frontend,
-PostgreSQL + Redis persistence, and a GitHub Actions CI/CD pipeline.
+Kubernetes-native full-stack application with three FastAPI microservices, a React 18 admin
+dashboard frontend, PostgreSQL + Redis persistence, and a GitHub Actions CI/CD pipeline.
 Container runtime is **Podman** (Containerfile, not Dockerfile).
+
+GitHub: https://github.com/jaosullivan/webapp/tree/main/fullstack
 
 ---
 
@@ -18,21 +20,24 @@ Container runtime is **Podman** (Containerfile, not Dockerfile).
 fullstack/
 ├── .vscode/                   # settings.json, launch.json, extensions.json
 ├── services/
-│   ├── users/                 # FastAPI — user registration, JWT auth
-│   ├── orders/                # FastAPI — order lifecycle
-│   ├── payments/              # FastAPI — payment processing
-│   └── shared/                # Shared auth utilities (JWT bearer extractor)
-├── frontend/                  # React 18 + TypeScript + Vite SPA
+│   ├── users/                 # FastAPI — registration, JWT auth (port 8001)
+│   ├── orders/                # FastAPI — order lifecycle (port 8002)
+│   ├── payments/              # FastAPI — payment processing (port 8003)
+│   └── shared/                # Shared JWT bearer extractor
+├── frontend/                  # React 18 + TypeScript + Vite admin dashboard (port 3000)
 ├── infra/
 │   ├── k8s/
 │   │   ├── base/              # namespace.yaml, ingress.yaml (NGINX)
 │   │   ├── services/          # Deployment + Service per workload
 │   │   └── secrets/           # Managed manually, not committed
-│   ├── helm/                  # Helm chart stubs (one dir per service)
+│   ├── helm/                  # Helm chart stubs (templates not yet populated)
 │   └── database/              # postgres.yaml, redis.yaml with PVCs
-└── ops/
-    ├── ci/ci.yml              # GitHub Actions — test matrix + Podman build
-    └── cd/deploy.yml          # GitHub Actions — kubectl apply + rollout
+├── ops/
+│   ├── ci/ci.yml              # GitHub Actions — pytest matrix + Podman build
+│   └── cd/deploy.yml          # GitHub Actions — kubectl apply + rollout wait
+├── seed.py                    # Populates demo data via service APIs
+├── start-dev.ps1              # One-shot script to start all services locally
+└── docker-compose.yml         # PostgreSQL 16 + Redis 7 for local dev (use Podman)
 ```
 
 ---
@@ -42,68 +47,139 @@ fullstack/
 | Layer | Technology |
 |---|---|
 | Backend | Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2.x (async) |
-| Auth | `python-jose` (JWT), `passlib[bcrypt]` — users service only |
-| Frontend | React 18, TypeScript 5, Vite, React Router v6, axios |
+| Auth | `python-jose` (JWT) + `bcrypt` (direct, not passlib — incompatible with bcrypt 5.x) |
+| Frontend | React 18, TypeScript 5, Vite 8, React Router v6, axios |
+| UI Components | shadcn/ui (manual, no CLI) + Tailwind CSS v4 + lucide-react |
 | Primary DB | PostgreSQL 16 (`asyncpg`) |
 | Cache | Redis 7 |
 | Container | Podman / Containerfile |
 | Orchestration | Kubernetes + Helm |
 | CI/CD | GitHub Actions (`ops/ci/`, `ops/cd/`) |
+| Testing | pytest + pytest-asyncio + httpx (ASGITransport) + pytest-watch |
+
+---
+
+## API Endpoints
+
+### Users service — port 8001
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Health check |
+| POST | `/api/v1/users` | Register user (`{email, password}`) |
+| GET | `/api/v1/users` | List users (`?skip=&limit=`) |
+| GET | `/api/v1/users/{id}` | Get user |
+| PATCH | `/api/v1/users/{id}/status` | Toggle active/inactive |
+| POST | `/api/v1/auth/token` | Login — returns JWT (`application/x-www-form-urlencoded`) |
+
+### Orders service — port 8002
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Health check |
+| POST | `/api/v1/orders` | Create order (`{user_id, total}`) |
+| GET | `/api/v1/orders` | List orders (`?skip=&limit=`) |
+| GET | `/api/v1/orders/stats` | Aggregate stats — total, by_status, total_value |
+| GET | `/api/v1/orders/user/{user_id}` | Orders for a user |
+| GET | `/api/v1/orders/{id}` | Get order |
+| PATCH | `/api/v1/orders/{id}/status` | Update status (`{status}`) |
+
+Order statuses: `pending` → `confirmed` → `shipped` → `delivered` | `cancelled`
+
+### Payments service — port 8003
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Health check |
+| POST | `/api/v1/payments` | Create payment (`{order_id, amount}`) |
+| GET | `/api/v1/payments` | List payments (`?skip=&limit=`) |
+| GET | `/api/v1/payments/stats` | Aggregate stats — total, by_status, revenue (completed only) |
+| GET | `/api/v1/payments/{id}` | Get payment |
+| POST | `/api/v1/payments/{id}/process` | Mark completed, assign provider_ref (idempotent) |
+| PATCH | `/api/v1/payments/{id}/status` | Set status (`pending`/`completed`/`failed`/`refunded`) |
 
 ---
 
 ## Per-Service Layout
 
-Every service under `services/<name>/` follows this structure:
-
 ```
 services/<name>/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py            # FastAPI app, includes router, /health endpoint
-│   ├── api/
-│   │   └── routes.py      # APIRouter — endpoints call get_db directly
+│   ├── main.py            # FastAPI app + lifespan (runs create_all) + CORS
+│   ├── api/routes.py      # All endpoints — call get_db directly, no repo layer
 │   ├── core/
 │   │   ├── config.py      # pydantic-settings BaseSettings (reads .env)
-│   │   └── security.py    # JWT helpers (users service only)
+│   │   └── security.py    # JWT encode/decode (users service only)
 │   ├── db/
-│   │   └── session.py     # AsyncEngine, AsyncSessionLocal, get_db dep
-│   ├── models/
-│   │   └── <entity>.py    # SQLAlchemy DeclarativeBase ORM models
-│   └── schemas/
-│       └── <entity>.py    # Pydantic request/response schemas
+│   │   ├── base.py        # DeclarativeBase
+│   │   └── session.py     # create_async_engine, AsyncSessionLocal, get_db, init_db
+│   ├── models/<entity>.py # SQLAlchemy ORM models
+│   └── schemas/<entity>.py# Pydantic request/response schemas
 ├── tests/
-│   └── test_<name>.py
+│   ├── conftest.py        # engine fixture, clean_tables autouse, client fixture
+│   └── test_<name>.py     # Full test suite
 ├── Containerfile
 └── pyproject.toml
 ```
-
-### Service ports (local dev)
-
-| Service | Port |
-|---|---|
-| users | 8001 |
-| orders | 8002 |
-| payments | 8003 |
-| frontend | 3000 |
 
 ---
 
 ## Local Development
 
-```bash
-# Per-service (pick the right port)
+### Prerequisites
+
+- Python 3.11+ (project uses 3.14 at `C:\Users\johna\AppData\Local\Programs\Python\Python314\`)
+- Node.js 20+ at `C:\Program Files\nodejs\`
+- Podman running with containers `fullstack-postgres` (port 5432) and `fullstack-redis` (port 6379)
+
+### Start everything
+
+```powershell
+# From fullstack/
+.\start-dev.ps1
+```
+
+This starts Podman containers, all three backend services in terminal windows, and the Vite dev server.
+
+### Manual startup
+
+```powershell
+# Start Podman containers
+podman start fullstack-postgres fullstack-redis
+
+# Per-service
 cd services/users
 pip install -e ".[dev]"
-uvicorn app.main:app --reload --port 8001
+python -m uvicorn app.main:app --reload --port 8001
 
 # Frontend
 cd frontend
 npm install
-npm run dev    # :3000 — proxies /api/users→8001, /api/orders→8002, /api/payments→8003
+npm run dev    # http://localhost:3000
 ```
 
-VS Code launch configs (`F5`) cover all three services with env vars pre-filled.
+### Seed demo data
+
+```powershell
+# From fullstack/ — requires all three services to be running
+python seed.py
+```
+
+Creates 10 users, ~35 orders across all statuses, ~30 payments (mix of completed/pending/failed).
+
+### Run tests
+
+```powershell
+cd services/users    && python -m pytest tests/ -v
+cd services/orders   && python -m pytest tests/ -v
+cd services/payments && python -m pytest tests/ -v
+
+# Watch mode (re-runs on file save — TDD workflow)
+python -m pytest_watch tests/
+```
+
+Tests use real PostgreSQL (`users_test`, `orders_test`, `payments_test` databases).
+Tables are truncated between each test for isolation.
 
 ---
 
@@ -116,7 +192,7 @@ podman build -t fullstack/payments:latest -f services/payments/Containerfile ser
 podman build -t fullstack/frontend:latest -f frontend/Containerfile          frontend/
 ```
 
-Images are tagged `fullstack/<service>:<git-sha>` in CI.
+Images tagged `fullstack/<service>:<git-sha>` in CI.
 
 ---
 
@@ -124,12 +200,22 @@ Images are tagged `fullstack/<service>:<git-sha>` in CI.
 
 ```bash
 kubectl apply -f infra/k8s/base/       # namespace + NGINX ingress
-kubectl apply -f infra/database/       # postgres + redis
+kubectl apply -f infra/database/       # postgres + redis with PVCs
 kubectl apply -f infra/k8s/services/   # all four workloads
 ```
 
-Ingress routes: `fullstack.local/api/users/*` → users, `/api/orders/*` → orders,
-`/api/payments/*` → payments, `/*` → frontend. Add `fullstack.local` to `/etc/hosts`.
+Ingress routes: `fullstack.local/api/v1/auth` and `/api/v1/users` → users,
+`/api/v1/orders` → orders, `/api/v1/payments` → payments, `/*` → frontend.
+Add `fullstack.local` to `/etc/hosts`.
+
+---
+
+## Frontend
+
+- Vite proxy routes `/api/v1/auth` and `/api/v1/users` → `:8001`, `/api/v1/orders` → `:8002`, `/api/v1/payments` → `:8003`
+- JWT stored in `localStorage`. Axios interceptor attaches `Authorization: Bearer <token>` to every request and redirects to `/login` on 401.
+- Dashboard stats use `GET /orders/stats` and `GET /payments/stats` — not paginated list fetches.
+- shadcn/ui components are hand-written (no CLI) in `frontend/src/components/ui/`.
 
 ---
 
@@ -138,52 +224,102 @@ Ingress routes: `fullstack.local/api/users/*` → users, `/api/orders/*` → ord
 ### Python / FastAPI
 
 - All config from environment variables via `pydantic-settings`. Local: copy `.env.example` → `.env`.
-- `async def` throughout. Never use synchronous SQLAlchemy or sync HTTP clients.
-- Routes query `AsyncSession` directly via `Depends(get_db)` — no separate repository layer.
-- Every endpoint returns a Pydantic response model. Never return raw dicts.
-- UUID string primary keys on all models (`default=lambda: str(uuid.uuid4())`).
-- All response schemas use `model_config = {"from_attributes": True}`.
+- `async def` throughout — never sync SQLAlchemy or sync HTTP clients.
+- Routes call `AsyncSession` via `Depends(get_db)` directly — no repository layer.
+- Every endpoint returns a Pydantic response model — never raw dicts.
+- UUID string PKs on all models: `default=lambda: str(uuid.uuid4())`.
+- Response schemas use `model_config = {"from_attributes": True}`.
 - Raise `HTTPException` for all error responses.
 - Every service exposes `GET /health → {"status": "ok"}`.
+- Stats/aggregate routes registered **before** `/{id}` routes to avoid FastAPI matching `stats` as an ID.
+
+### Auth (users service only)
+
+- Passwords hashed with `bcrypt` directly (not passlib — passlib 1.7.4 is incompatible with bcrypt 4+).
+- JWT signed with HS256. Secret in `SECRET_KEY` env var.
+- Login endpoint accepts `application/x-www-form-urlencoded` (OAuth2PasswordRequestForm).
 
 ### Inter-service communication
 
 - Services call each other over HTTP using `httpx.AsyncClient`.
-- JWT tokens issued by the users service. `services/shared/auth.py` provides a bearer extractor
-  for orders/payments to validate tokens without re-implementing JWT logic.
-- Each service owns its own database. No cross-service DB queries.
+- `services/shared/auth.py` provides a bearer extractor for orders/payments to validate JWTs.
+- Each service owns its own database — no cross-service DB queries.
 
 ### TypeScript / React
 
 - Functional components only.
-- `react-router-dom` v6 for routing (`Routes` / `Route`).
-- `axios` for API calls.
-- File naming: `PascalCase` for components, `camelCase` for utilities.
+- `react-router-dom` v6 for routing.
+- `axios` for all API calls, configured in `frontend/src/lib/api.ts`.
+- File naming: `PascalCase` components, `camelCase` utilities.
 
-### K8s / Helm
+### Testing
 
-- Resource `requests` and `limits` are required on every container.
-- `readinessProbe` required on every deployment.
-- Helm chart directories exist under `infra/helm/<service>/` — templates not yet populated.
+- Tests use `ASGITransport` (in-process) — no running server needed.
+- `conftest.py` sets `DATABASE_URL` env var **before** any app imports to point at `*_test` DB.
+- Session-scoped engine fixture creates/drops tables once per test run.
+- `autouse` fixture truncates all tables before each test.
+- `client` fixture overrides `get_db` dependency with test session factory.
 
 ---
 
 ## CI/CD
 
-| File | Trigger | What it does |
-|---|---|---|
-| `ops/ci/ci.yml` | Push / PR | pytest matrix (users, orders, payments) → Podman build all 4 images |
-| `ops/cd/deploy.yml` | Push to `main` | `kubectl apply` base + db + services, `kubectl set image`, rollout wait |
+CI is GitHub Actions. CD is ArgoCD (GitOps — no `kubectl` in the pipeline after bootstrap).
 
-Secrets required: `KUBECONFIG` in GitHub Actions environment `production`.
+### Flow
+
+```
+Push to main
+    │
+    ├─ test (matrix: users, orders, payments)
+    │       pytest against ephemeral PostgreSQL service container
+    │
+    ├─ build-push (after tests pass)
+    │       podman build + push to ghcr.io/jaosullivan/webapp/<service>:<sha>
+    │
+    └─ update-manifests
+            kustomize edit set image → updates infra/k8s/overlays/production/kustomization.yaml
+            git commit + push [skip ci]
+                │
+                └─ ArgoCD detects the change → syncs cluster automatically
+```
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `ops/ci/ci.yml` | Test → build → push → update Kustomize overlay |
+| `ops/cd/bootstrap-argocd.yml` | One-time manual workflow: installs ArgoCD, registers the Application |
+| `infra/argocd/project.yaml` | ArgoCD AppProject — scopes source repo and allowed namespaces |
+| `infra/argocd/apps/fullstack-app.yaml` | ArgoCD Application — watches `infra/k8s/overlays/production`, auto-syncs |
+| `infra/k8s/overlays/production/kustomization.yaml` | Kustomize overlay; CI writes image tags here |
+
+### Image registry
+
+`ghcr.io/jaosullivan/webapp/<service>:<sha>` and `:latest`
+
+### ArgoCD sync policy
+
+- `automated.prune: true` — removes K8s resources deleted from Git
+- `automated.selfHeal: true` — reverts out-of-band manual cluster changes
+- `CreateNamespace=true` — ArgoCD creates the `fullstack` namespace if absent
+
+### Secrets required
+
+| Secret | Where | Value |
+|---|---|---|
+| `GITHUB_TOKEN` | Auto-provided | Push packages to ghcr.io, commit manifest changes |
+| `KUBECONFIG` | GitHub Actions environment `production` | Only needed for the one-time bootstrap |
 
 ---
 
 ## Do Not
 
 - Do not hardcode secrets, passwords, or API keys in source code
+- Do not use `passlib` — use `bcrypt` directly (passlib incompatible with bcrypt 5.x)
 - Do not use synchronous SQLAlchemy (`create_engine`) — always `create_async_engine`
 - Do not return raw `dict` from endpoints — always use a Pydantic response model
-- Do not query another service's database directly — use HTTP calls instead
+- Do not query another service's database directly — use HTTP calls
 - Do not use sync HTTP clients (`requests`) — use `httpx.AsyncClient`
 - Do not commit `.env` files or K8s Secret manifests with real values
+- Do not register `/{id}` routes before named routes like `/stats` or `/user/{uid}`
