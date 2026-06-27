@@ -311,6 +311,41 @@ Push to main
 | `GITHUB_TOKEN` | Auto-provided | Push packages to ghcr.io, commit manifest changes |
 | `KUBECONFIG` | GitHub Actions environment `production` | Only needed for the one-time bootstrap |
 
+### Local cluster (k3s in WSL2 Ubuntu)
+
+A local Kubernetes cluster runs k3s inside the Ubuntu WSL2 distro.
+
+**Kubeconfig**: `C:\Users\johna\.kube\k3s-config.yaml`  
+**kubectl**: `C:\Program Files\Docker\Docker\resources\bin\kubectl.exe`
+
+The server IP in the kubeconfig (`172.20.183.125`) is the Ubuntu WSL2 NIC IP which can change on WSL restart. To refresh it:
+```powershell
+$wslIp = (wsl -d Ubuntu -u root -- hostname -I) -split '\s+' | Select-Object -First 1
+$cfg = Get-Content "C:\Users\johna\.kube\k3s-config.yaml" -Raw
+# replace old IP with new one, then Set-Content
+```
+
+**ArgoCD UI**: `https://localhost:8080` (after port-forward)  
+```powershell
+$env:KUBECONFIG = "C:\Users\johna\.kube\k3s-config.yaml"
+& "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe" port-forward svc/argocd-server -n argocd 8080:443
+# user: admin  password: get with:
+& "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe" -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_)) }
+```
+
+**In-cluster secrets** (not in Git — apply imperatively after cluster restart):
+```powershell
+$kubectl = "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe"
+& $kubectl create secret generic postgres-secrets -n fullstack --from-literal=password=postgres --dry-run=client -o yaml | & $kubectl apply -f -
+@("users","orders","payments") | ForEach-Object {
+  $url = "postgresql+asyncpg://postgres:postgres@postgres.fullstack.svc.cluster.local:5432/$_"
+  & $kubectl create secret generic "${_}-secrets" -n fullstack --from-literal=database-url=$url --dry-run=client -o yaml | & $kubectl apply -f -
+}
+```
+
+**ArgoCD kustomize config** (already patched — survives restarts):
+- `argocd-cm` ConfigMap has `kustomize.buildOptions: --load-restrictor LoadRestrictionsNone`
+
 ---
 
 ## Do Not
