@@ -125,7 +125,7 @@ python seed.py
 
 Open http://localhost:3000 and log in with your admin credentials.
 
-> **Windows:** Run `.\start-dev.ps1` from the `fullstack/` directory to start everything at once.
+> **Windows:** Run `.\start-dev.ps1` from the `fullstack/` directory to start everything at once — Podman containers, all three services, the frontend dev server, and the local k3s cluster with ArgoCD UI at `https://localhost:8080`.
 
 ---
 
@@ -140,14 +140,19 @@ fullstack/
 │   └── shared/         # JWT bearer extractor shared across services
 ├── frontend/           # React SPA (port 3000)
 ├── infra/
-│   ├── k8s/            # Kubernetes manifests (base, services, secrets)
+│   ├── k8s/
+│   │   ├── base/       # namespace.yaml, ingress.yaml
+│   │   ├── services/   # Deployment + Service per workload
+│   │   └── overlays/production/  # Kustomize overlay — image tags updated by CI
+│   ├── argocd/         # AppProject + Application manifests
 │   ├── helm/           # Helm chart stubs
 │   └── database/       # PostgreSQL + Redis with PVCs
-├── ops/
-│   ├── ci/ci.yml       # GitHub Actions — test + Podman build
-│   └── cd/deploy.yml   # GitHub Actions — deploy to Kubernetes
+├── .github/workflows/
+│   ├── ci.yml          # Test → build → push → update Kustomize overlay
+│   └── bootstrap-argocd.yml  # One-time manual ArgoCD install
+├── ops/                # Redirect stubs pointing to .github/workflows/
 ├── seed.py             # Demo data generator
-├── start-dev.ps1       # Windows one-shot dev startup
+├── start-dev.ps1       # Windows one-shot: local dev + k3s cluster + ArgoCD UI
 └── docker-compose.yml  # PostgreSQL + Redis for local dev
 ```
 
@@ -248,48 +253,64 @@ podman build -t fullstack/frontend:latest -f frontend/Containerfile          fro
 
 ### Deploy to Kubernetes
 
-```bash
-kubectl apply -f infra/k8s/base/       # namespace + NGINX ingress
-kubectl apply -f infra/database/       # postgres + redis with PVCs
-kubectl apply -f infra/k8s/services/   # all four workloads
-```
+Cluster state is managed by ArgoCD — do not apply service manifests directly with `kubectl apply`. The CI pipeline writes image tags to the Kustomize overlay and ArgoCD syncs the cluster automatically.
 
-Add `fullstack.local` to `/etc/hosts` pointing to your ingress IP.
+For a new cluster, apply postgres and create the secrets (not managed by ArgoCD since they contain credentials):
+
+```bash
+kubectl apply -f infra/database/postgres.yaml -n fullstack
+kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE users;"
+kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE orders;"
+kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE payments;"
+
+kubectl create secret generic postgres-secrets -n fullstack --from-literal=password=postgres
+for svc in users orders payments; do
+  kubectl create secret generic ${svc}-secrets -n fullstack \
+    --from-literal=database-url="postgresql+asyncpg://postgres:postgres@postgres.fullstack.svc.cluster.local:5432/${svc}"
+done
+```
 
 ### CI/CD — GitHub Actions + ArgoCD
 
-CD is GitOps: the pipeline never runs `kubectl apply`. Instead it updates a Kustomize overlay in Git and ArgoCD syncs the cluster automatically.
+CD is GitOps: the pipeline never runs `kubectl apply`. Instead it updates the Kustomize production overlay in Git and ArgoCD syncs the cluster automatically.
 
 ```
 Push to main
     │
-    ├─ test       pytest against ephemeral PostgreSQL service container
-    ├─ build-push podman build + push → ghcr.io/jaosullivan/webapp/<service>:<sha>
+    ├─ test            pytest against ephemeral PostgreSQL service container
+    ├─ build-push      docker build + push → ghcr.io/jaosullivan/webapp/<service>:<sha>
     └─ update-manifests
               kustomize edit set image → commit infra/k8s/overlays/production/kustomization.yaml
                     │
-                    └─ ArgoCD detects the change → syncs cluster
+                    └─ ArgoCD detects the change → syncs cluster automatically
 ```
 
 | File | Purpose |
 |---|---|
-| `ops/ci/ci.yml` | Test → build → push → update Kustomize overlay |
-| `ops/cd/bootstrap-argocd.yml` | One-time manual workflow: install ArgoCD + register Application |
-| `infra/argocd/project.yaml` | ArgoCD AppProject |
+| `.github/workflows/ci.yml` | Test → build → push → update Kustomize overlay |
+| `.github/workflows/bootstrap-argocd.yml` | One-time `workflow_dispatch`: install ArgoCD + register Application |
+| `infra/argocd/project.yaml` | ArgoCD AppProject — scopes repo and namespaces |
 | `infra/argocd/apps/fullstack-app.yaml` | ArgoCD Application — auto-sync with prune + selfHeal |
 | `infra/k8s/overlays/production/kustomization.yaml` | Image tags written here by CI |
 
-**ArgoCD bootstrap** (run once after cluster is provisioned):
+**ArgoCD bootstrap** (run once per cluster):
 
 ```bash
-# Or trigger ops/cd/bootstrap-argocd.yml via GitHub Actions workflow_dispatch
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.12.0/manifests/install.yaml
+
+# Allow kustomize to resolve ../../base paths
+kubectl patch configmap argocd-cm -n argocd --type merge \
+  -p '{"data":{"kustomize.buildOptions":"--load-restrictor LoadRestrictionsNone"}}'
+kubectl rollout restart deployment/argocd-repo-server -n argocd
+
 kubectl apply -f infra/argocd/project.yaml
 kubectl apply -f infra/argocd/apps/fullstack-app.yaml
 ```
 
-**Secrets required:**
+**Local cluster (k3s in WSL2 Ubuntu):** `start-dev.ps1` handles k3s startup and kubeconfig refresh automatically. ArgoCD UI is available at `https://localhost:8080` (user: `admin`).
+
+**Secrets required for CI:**
 
 | Secret | Scope | Purpose |
 |---|---|---|

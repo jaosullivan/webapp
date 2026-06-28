@@ -27,16 +27,24 @@ fullstack/
 ├── frontend/                  # React 18 + TypeScript + Vite admin dashboard (port 3000)
 ├── infra/
 │   ├── k8s/
-│   │   ├── base/              # namespace.yaml, ingress.yaml (NGINX)
+│   │   ├── base/              # namespace.yaml, ingress.yaml (nginx class — left as-is for production)
 │   │   ├── services/          # Deployment + Service per workload
-│   │   └── secrets/           # Managed manually, not committed
-│   ├── helm/                  # Helm chart stubs (templates not yet populated)
+│   │   ├── overlays/
+│   │   │   └── production/    # Kustomize overlay — CI writes image tags here
+│   │   └── secrets/           # Managed manually out-of-band, never committed
+│   ├── argocd/
+│   │   ├── project.yaml       # ArgoCD AppProject
+│   │   └── apps/fullstack-app.yaml  # ArgoCD Application — auto-syncs production overlay
+│   ├── helm/                  # Helm chart stubs (not yet populated)
 │   └── database/              # postgres.yaml, redis.yaml with PVCs
 ├── ops/
-│   ├── ci/ci.yml              # GitHub Actions — pytest matrix + Podman build
-│   └── cd/deploy.yml          # GitHub Actions — kubectl apply + rollout wait
+│   ├── ci/ci.yml              # Redirect stub → .github/workflows/ci.yml
+│   └── cd/bootstrap-argocd.yml # Redirect stub → .github/workflows/bootstrap-argocd.yml
+├── .github/workflows/
+│   ├── ci.yml                 # Active: pytest matrix → Podman build → ghcr.io push → kustomize update
+│   └── bootstrap-argocd.yml   # Active: one-time manual workflow to bootstrap ArgoCD on a cluster
 ├── seed.py                    # Populates demo data via service APIs
-├── start-dev.ps1              # One-shot script to start all services locally
+├── start-dev.ps1              # One-shot: Podman containers + services + frontend + k3s + ArgoCD UI
 └── docker-compose.yml         # PostgreSQL 16 + Redis 7 for local dev (use Podman)
 ```
 
@@ -53,8 +61,8 @@ fullstack/
 | Primary DB | PostgreSQL 16 (`asyncpg`) |
 | Cache | Redis 7 |
 | Container | Podman / Containerfile |
-| Orchestration | Kubernetes + Helm |
-| CI/CD | GitHub Actions (`ops/ci/`, `ops/cd/`) |
+| Orchestration | Kubernetes (k3s locally, any cluster in production) |
+| CI/CD | GitHub Actions (`.github/workflows/`) + ArgoCD GitOps |
 | Testing | pytest + pytest-asyncio + httpx (ASGITransport) + pytest-watch |
 
 ---
@@ -139,7 +147,7 @@ services/<name>/
 .\start-dev.ps1
 ```
 
-This starts Podman containers, all three backend services in terminal windows, and the Vite dev server.
+This starts Podman containers, all three backend services in terminal windows, the Vite dev server, and the local k3s cluster with an ArgoCD port-forward at `https://localhost:8080`.
 
 ### Manual startup
 
@@ -198,15 +206,17 @@ Images tagged `fullstack/<service>:<git-sha>` in CI.
 
 ## Kubernetes
 
-```bash
-kubectl apply -f infra/k8s/base/       # namespace + NGINX ingress
-kubectl apply -f infra/database/       # postgres + redis with PVCs
-kubectl apply -f infra/k8s/services/   # all four workloads
-```
+Cluster state is managed by ArgoCD — do not `kubectl apply` the service manifests directly. ArgoCD watches `infra/k8s/overlays/production` and syncs automatically on every Git change.
 
-Ingress routes: `fullstack.local/api/v1/auth` and `/api/v1/users` → users,
-`/api/v1/orders` → orders, `/api/v1/payments` → payments, `/*` → frontend.
-Add `fullstack.local` to `/etc/hosts`.
+**Ingress** uses `ingressClassName: nginx`. On the local k3s cluster (which uses Traefik) this resource exists but is ignored — access services via `kubectl port-forward` instead. On a production cluster with an NGINX ingress controller, Ingress routes `fullstack.local` traffic to each service.
+
+**In-cluster postgres** (local cluster only — not managed by ArgoCD):
+```bash
+kubectl apply -f infra/database/postgres.yaml -n fullstack
+kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE users;"
+kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE orders;"
+kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE payments;"
+```
 
 ---
 
@@ -288,8 +298,10 @@ Push to main
 
 | File | Purpose |
 |---|---|
-| `ops/ci/ci.yml` | Test → build → push → update Kustomize overlay |
-| `ops/cd/bootstrap-argocd.yml` | One-time manual workflow: installs ArgoCD, registers the Application |
+| `.github/workflows/ci.yml` | Active: test → build → push → update Kustomize overlay |
+| `.github/workflows/bootstrap-argocd.yml` | Active: one-time `workflow_dispatch` to install ArgoCD on a cluster |
+| `ops/ci/ci.yml` | Redirect stub (navigation only — edit `.github/workflows/ci.yml`) |
+| `ops/cd/bootstrap-argocd.yml` | Redirect stub (navigation only) |
 | `infra/argocd/project.yaml` | ArgoCD AppProject — scopes source repo and allowed namespaces |
 | `infra/argocd/apps/fullstack-app.yaml` | ArgoCD Application — watches `infra/k8s/overlays/production`, auto-syncs |
 | `infra/k8s/overlays/production/kustomization.yaml` | Kustomize overlay; CI writes image tags here |
