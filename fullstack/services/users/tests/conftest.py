@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/users_test")
 os.environ.setdefault("INITIAL_ADMIN_EMAIL", "admin@test.com")
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 
 import pytest
 import pytest_asyncio
