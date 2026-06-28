@@ -123,6 +123,7 @@ describe("ToastContext", () => {
           <button onClick={() => addToast("err", "error")}>add-error</button>
           <button onClick={() => addToast("ok", "success")}>add-success</button>
           <span data-testid="count">{toasts.length}</span>
+          <ul>{toasts.map((t) => <li key={t.id}>{t.message}</li>)}</ul>
         </div>
       );
     }
