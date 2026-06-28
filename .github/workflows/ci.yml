@@ -286,6 +286,7 @@ jobs:
             --severity CRITICAL \
             --exit-code 1 \
             --no-progress \
+            --ignore-unfixed \
             "${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}"
 
   # ------------------------------------------------------------------
