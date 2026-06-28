@@ -275,13 +275,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin
+
       - name: Scan ${{ matrix.service }} for CRITICAL CVEs
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: "${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}"
-          format: "table"
-          severity: "CRITICAL"
-          exit-code: "1"
+        run: |
+          trivy image \
+            --severity CRITICAL \
+            --exit-code 1 \
+            --no-progress \
+            "${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}"
 
   # ------------------------------------------------------------------
   # Update the Kustomize production overlay with the new image tags.
