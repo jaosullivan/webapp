@@ -60,9 +60,15 @@ async def health():
 
     try:
         import sqlalchemy
-        async with engine.connect() as conn:
-            await conn.execute(sqlalchemy.text("SELECT 1"))
-        checks["db"] = "ok"
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy.pool import NullPool
+        _hc = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+        try:
+            async with _hc.connect() as conn:
+                await conn.execute(sqlalchemy.text("SELECT 1"))
+            checks["db"] = "ok"
+        finally:
+            await _hc.dispose()
     except Exception as exc:
         checks["db"] = f"error: {exc}"
         status_code = 503
