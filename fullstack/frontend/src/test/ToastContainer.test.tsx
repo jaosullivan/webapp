@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { ToastProvider, useToast } from "@/contexts/ToastContext";
 import { ToastContainer } from "@/components/ui/toast";
 
@@ -45,50 +45,50 @@ describe("ToastContainer", () => {
 
   it("renders an alert when a toast is added", () => {
     renderSetup();
-    screen.getByRole("button", { name: "add-error" }).click();
+    act(() => { screen.getByRole("button", { name: "add-error" }).click(); });
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(screen.getByText("Default error")).toBeInTheDocument();
   });
 
   it("renders multiple toasts simultaneously", () => {
     renderSetup();
-    screen.getByRole("button", { name: "add-error" }).click();
-    screen.getByRole("button", { name: "add-success" }).click();
+    act(() => { screen.getByRole("button", { name: "add-error" }).click(); });
+    act(() => { screen.getByRole("button", { name: "add-success" }).click(); });
     expect(screen.getAllByRole("alert")).toHaveLength(2);
   });
 
   it("dismiss button removes the toast", () => {
     renderSetup();
-    screen.getByRole("button", { name: "add-error" }).click();
+    act(() => { screen.getByRole("button", { name: "add-error" }).click(); });
     expect(screen.getByRole("alert")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    act(() => { fireEvent.click(screen.getByRole("button", { name: "Dismiss" })); });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("disappears after auto-dismiss timeout", () => {
     renderSetup();
-    screen.getByRole("button", { name: "add-warning" }).click();
+    act(() => { screen.getByRole("button", { name: "add-warning" }).click(); });
     expect(screen.getByRole("alert")).toBeInTheDocument();
-    vi.advanceTimersByTime(5001);
+    act(() => { vi.advanceTimersByTime(5001); });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("applies distinct styling classes for each variant", () => {
     renderSetup();
 
-    screen.getByRole("button", { name: "add-error" }).click();
+    act(() => { screen.getByRole("button", { name: "add-error" }).click(); });
     expect(screen.getByRole("alert").className).toMatch(/red/);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    act(() => { fireEvent.click(screen.getByRole("button", { name: "Dismiss" })); });
 
-    screen.getByRole("button", { name: "add-warning" }).click();
+    act(() => { screen.getByRole("button", { name: "add-warning" }).click(); });
     expect(screen.getByRole("alert").className).toMatch(/amber/);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    act(() => { fireEvent.click(screen.getByRole("button", { name: "Dismiss" })); });
 
-    screen.getByRole("button", { name: "add-success" }).click();
+    act(() => { screen.getByRole("button", { name: "add-success" }).click(); });
     expect(screen.getByRole("alert").className).toMatch(/emerald/);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    act(() => { fireEvent.click(screen.getByRole("button", { name: "Dismiss" })); });
 
-    screen.getByRole("button", { name: "add-info" }).click();
+    act(() => { screen.getByRole("button", { name: "add-info" }).click(); });
     expect(screen.getByRole("alert").className).toMatch(/sky/);
   });
 });

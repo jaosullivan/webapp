@@ -48,7 +48,7 @@ describe("ToastContext", () => {
         <ToastConsumer message="Test message" variant="success" />
       </ToastProvider>
     );
-    screen.getByRole("button", { name: "add" }).click();
+    act(() => { screen.getByRole("button", { name: "add" }).click(); });
     const item = screen.getByTestId("toast-item");
     expect(item).toHaveTextContent("Test message");
     expect(item).toHaveAttribute("data-variant", "success");
@@ -60,7 +60,7 @@ describe("ToastContext", () => {
         <ToastConsumer message="oops" />
       </ToastProvider>
     );
-    screen.getByRole("button", { name: "add" }).click();
+    act(() => { screen.getByRole("button", { name: "add" }).click(); });
     expect(screen.getByTestId("toast-item")).toHaveAttribute("data-variant", "error");
   });
 
@@ -70,9 +70,9 @@ describe("ToastContext", () => {
         <ToastConsumer />
       </ToastProvider>
     );
-    screen.getByRole("button", { name: "add" }).click();
+    act(() => { screen.getByRole("button", { name: "add" }).click(); });
     expect(screen.getByTestId("toast-item")).toBeInTheDocument();
-    screen.getByRole("button", { name: "remove-first" }).click();
+    act(() => { screen.getByRole("button", { name: "remove-first" }).click(); });
     expect(screen.queryByTestId("toast-item")).not.toBeInTheDocument();
   });
 
@@ -82,7 +82,7 @@ describe("ToastContext", () => {
         <ToastConsumer />
       </ToastProvider>
     );
-    screen.getByRole("button", { name: "add" }).click();
+    act(() => { screen.getByRole("button", { name: "add" }).click(); });
     expect(screen.getByTestId("toast-item")).toBeInTheDocument();
     act(() => {
       vi.advanceTimersByTime(5001);
@@ -111,7 +111,7 @@ describe("ToastContext", () => {
         <SpamConsumer />
       </ToastProvider>
     );
-    screen.getByRole("button", { name: "spam" }).click();
+    act(() => { screen.getByRole("button", { name: "spam" }).click(); });
     expect(screen.getByTestId("count").textContent).toBe("5");
   });
 
@@ -131,8 +131,8 @@ describe("ToastContext", () => {
         <MultiVariantConsumer />
       </ToastProvider>
     );
-    screen.getByRole("button", { name: "add-error" }).click();
-    screen.getByRole("button", { name: "add-success" }).click();
+    act(() => { screen.getByRole("button", { name: "add-error" }).click(); });
+    act(() => { screen.getByRole("button", { name: "add-success" }).click(); });
     expect(screen.getByTestId("count").textContent).toBe("2");
     expect(screen.getByText("err")).toBeInTheDocument();
     expect(screen.getByText("ok")).toBeInTheDocument();
