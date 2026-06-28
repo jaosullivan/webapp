@@ -16,6 +16,10 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+vi.mock("@/lib/auth", () => ({
+  isAdmin: vi.fn().mockReturnValue(true),
+}));
+
 import { auth } from "@/lib/api";
 const mockLogout = vi.mocked(auth.logout);
 
