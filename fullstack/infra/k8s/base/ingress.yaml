@@ -6,8 +6,18 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /api/v1/$2
+    cert-manager.io/cluster-issuer: fullstack-ca-issuer
+    # Force HTTPS and add HSTS header (max-age 1 year)
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/hsts: "true"
+    nginx.ingress.kubernetes.io/hsts-max-age: "31536000"
+    nginx.ingress.kubernetes.io/hsts-include-subdomains: "false"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - fullstack.local
+      secretName: fullstack-tls
   rules:
     - host: fullstack.local
       http:

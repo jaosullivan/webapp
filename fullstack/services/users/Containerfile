@@ -1,9 +1,19 @@
+FROM python:3.11-slim AS builder
+WORKDIR /build
+COPY users/pyproject.toml .
+RUN pip install --no-cache-dir --prefix=/deps .
+
 FROM python:3.11-slim
-
+RUN addgroup --system --gid 1001 app \
+ && adduser --system --uid 1001 --ingroup app --no-create-home app
 WORKDIR /app
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
-COPY app/ ./app/
-
+COPY --from=builder /deps /usr/local
+COPY users/app/ ./app/
+COPY users/alembic.ini .
+COPY users/migrations/ ./migrations/
+COPY shared/ ./shared/
+ENV PYTHONPATH=/app \
+    PYTHONDONTWRITEBYTECODE=1
+USER 1001
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

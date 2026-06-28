@@ -1,63 +1,61 @@
-# Fullstack — Cloud-Native Admin Dashboard
+# Fullstack — Kubernetes-Native Admin Dashboard
 
-A production-ready full-stack application demonstrating microservices architecture, test-driven development, and Kubernetes deployment. Three FastAPI backend services, a React admin dashboard, PostgreSQL, Redis, and a GitHub Actions CI/CD pipeline.
+A production-grade fullstack application: three FastAPI microservices, a React 18 admin dashboard, and a GitOps deployment pipeline. Demonstrates real-world patterns — JWT auth with refresh tokens, RBAC, structured observability, hardened Kubernetes workloads, and automated security scanning.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    React Admin Dashboard                  │
-│            (Vite · TypeScript · Tailwind CSS v4)          │
-│                      localhost:3000                       │
-└──────────┬────────────────┬────────────────┬─────────────┘
-           │ /api/v1/users  │ /api/v1/orders │ /api/v1/payments
-           ▼                ▼                ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│ Users        │  │ Orders       │  │ Payments     │
-│ FastAPI      │  │ FastAPI      │  │ FastAPI      │
-│ :8001        │  │ :8002        │  │ :8003        │
-└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
-       │                 │                  │
-       ▼                 ▼                  ▼
-┌─────────────────────────────────────────────────────────┐
-│              PostgreSQL 16  ·  Redis 7                   │
-│         (users_db · orders_db · payments_db)             │
-└─────────────────────────────────────────────────────────┘
+Browser → NGINX ingress (HTTPS + HSTS)
+              │
+    ┌─────────┼──────────┬───────────────┐
+    ▼         ▼          ▼               ▼
+ frontend   users      orders        payments
+ React 18   FastAPI    FastAPI       FastAPI
+ :8080      :8000      :8000         :8000
+              │
+    ┌─────────┴──────────┐
+    ▼                    ▼
+ PostgreSQL            Redis 7
+ (per-service DB)      (JWT blocklist)
+
+Observability: Prometheus · Grafana · Loki · Tempo · Alertmanager
 ```
 
 ---
 
 ## Features
 
-- **Admin dashboard** — Login, overview stats, paginated tables for users / orders / payments
-- **JWT authentication** — Token issued by users service, validated across all services
-- **User management** — Register, list, toggle active/inactive status
-- **Order lifecycle** — Create and progress orders through `pending → confirmed → shipped → delivered`
-- **Payment processing** — Create, process, mark failed/refunded with provider reference tracking
-- **Aggregate stats** — `GET /orders/stats` and `GET /payments/stats` for dashboard metrics
-- **49 passing tests** — Full pytest suite with real PostgreSQL, table-level isolation between tests
-- **TDD workflow** — Stats endpoints built red → green → refactor with pytest-watch
-- **Kubernetes-ready** — Manifests, Helm chart stubs, NGINX ingress, PVCs for all workloads
-- **CI/CD** — GitHub Actions (CI) + ArgoCD (CD): test → build → push → GitOps sync
+**Auth & RBAC**
+- HS256 JWT — 15-minute access tokens + 7-day HttpOnly refresh tokens with rotation
+- Both tokens blocklisted in Redis on logout; blocklist checked on every request
+- `is_admin` claim in the JWT payload; `require_admin` FastAPI dependency (403 for non-admins)
+- Admin bootstrap via `INITIAL_ADMIN_EMAIL` env var — first registration with that email becomes admin
 
----
+**Frontend (Nexus dark theme)**
+- Axios 401 interceptor deduplicates concurrent refresh calls via a shared promise
+- `RequireAdmin` route guard + conditional Users nav from JWT payload decode
+- React error boundaries on every route — no blank screens on component failures
+- Toast notifications for 429, 5xx, and network errors
 
-## Tech Stack
+**Infrastructure**
+- Multi-stage Containerfiles — non-root user (uid 1001), `readOnlyRootFilesystem: true`, `capabilities: drop ALL`
+- Alembic migrations run as Kubernetes init containers before each deployment
+- Daily PostgreSQL backups (`pg_dump | gzip`) to a PVC — 7-day retention
+- HTTPS redirect + HSTS (1 year) at the ingress; nginx asset caching (`/assets/*` immutable)
+- HPA, PDB, and NetworkPolicy for all workloads
 
-| Layer | Technology |
-|---|---|
-| Backend | Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2.x async |
-| Auth | python-jose (JWT HS256), bcrypt |
-| Frontend | React 18, TypeScript 5, Vite 8, React Router v6, axios |
-| UI | Tailwind CSS v4, shadcn/ui components, lucide-react |
-| Database | PostgreSQL 16 (asyncpg) |
-| Cache | Redis 7 |
-| Containers | Podman / Containerfile |
-| Orchestration | Kubernetes, Helm |
-| CI/CD | GitHub Actions + ArgoCD |
-| Testing | pytest, pytest-asyncio, httpx ASGITransport, pytest-watch |
+**Observability**
+- Prometheus metrics + auto-provisioned Grafana dashboard
+- Loki + Promtail for structured JSON log aggregation
+- Tempo for distributed traces via OpenTelemetry
+- Alertmanager with Slack integration
+
+**CI/CD**
+- GitHub Actions: tests → E2E (real backends) → Podman build → **Trivy CRITICAL scan** → Kustomize update → ArgoCD sync
+- Images with CRITICAL CVEs never reach production
+- Dependabot: weekly PRs for pip (3 services), npm, and GitHub Actions
 
 ---
 
@@ -65,270 +63,197 @@ A production-ready full-stack application demonstrating microservices architectu
 
 ### Prerequisites
 
-- Python 3.11+
-- Node.js 20+
-- Podman (or Docker)
+- Python 3.11+, Node.js 20+
+- Podman with `fullstack-postgres` (port 5432) and `fullstack-redis` (port 6379) containers
 
-### 1. Start the databases
+### Windows — one-shot startup
 
-```bash
-podman run -d --name fullstack-postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -p 5432:5432 postgres:16
-
-podman run -d --name fullstack-redis \
-  -p 6379:6379 redis:7-alpine
+```powershell
+# From fullstack/
+.\start-dev.ps1
 ```
 
-Create the application databases:
+Opens terminal windows for each backend service, starts the Vite dev server, starts k3s in WSL2, and port-forwards ArgoCD (`:8080`), Grafana (`:3001`), and Prometheus (`:9090`).
 
-```bash
-podman exec fullstack-postgres psql -U postgres -c "CREATE DATABASE users;"
-podman exec fullstack-postgres psql -U postgres -c "CREATE DATABASE orders;"
-podman exec fullstack-postgres psql -U postgres -c "CREATE DATABASE payments;"
+### Manual startup
+
+```powershell
+podman start fullstack-postgres fullstack-redis
+
+# Backend — run each in a separate terminal
+# PYTHONPATH must include services/ so `import shared` resolves
+$env:PYTHONPATH = "C:\path\to\fullstack\services"
+$env:INITIAL_ADMIN_EMAIL = "admin@example.com"   # users service only
+cd services/users    && python -m uvicorn app.main:app --reload --port 8001
+cd services/orders   && python -m uvicorn app.main:app --reload --port 8002
+cd services/payments && python -m uvicorn app.main:app --reload --port 8003
+
+cd frontend && npm run dev   # http://localhost:3000
 ```
 
-### 2. Install and start the backend services
+### Seed demo data
 
-```bash
-# Run each in a separate terminal
-
-cd services/users && pip install -e ".[dev]"
-python -m uvicorn app.main:app --reload --port 8001
-
-cd services/orders && pip install -e ".[dev]"
-python -m uvicorn app.main:app --reload --port 8002
-
-cd services/payments && pip install -e ".[dev]"
-python -m uvicorn app.main:app --reload --port 8003
-```
-
-### 3. Start the frontend
-
-```bash
-cd frontend
-npm install
-npm run dev        # http://localhost:3000
-```
-
-### 4. Create your first user and seed demo data
-
-```bash
-# Register an admin account
-curl -X POST http://localhost:8001/api/v1/users \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"admin123"}'
-
-# Seed ~10 users, 35 orders, 30 payments with realistic statuses
+```powershell
 python seed.py
 ```
 
-Open http://localhost:3000 and log in with your admin credentials.
+Creates 11 users (`admin@example.com` → `is_admin=True`), ~35 orders, ~30 payments. Authenticates as admin before calling protected endpoints.
 
-> **Windows:** Run `.\start-dev.ps1` from the `fullstack/` directory to start everything at once — Podman containers, all three services, the frontend dev server, and the local k3s cluster with ArgoCD UI at `https://localhost:8080`.
+Log in at `http://localhost:3000` with `admin@example.com` / `admin123`.
 
 ---
 
-## Project Structure
+## Testing
 
-```
-fullstack/
-├── services/
-│   ├── users/          # Auth + user management (port 8001)
-│   ├── orders/         # Order lifecycle (port 8002)
-│   ├── payments/       # Payment processing (port 8003)
-│   └── shared/         # JWT bearer extractor shared across services
-├── frontend/           # React SPA (port 3000)
-├── infra/
-│   ├── k8s/
-│   │   ├── base/       # namespace.yaml, ingress.yaml
-│   │   ├── services/   # Deployment + Service per workload
-│   │   └── overlays/production/  # Kustomize overlay — image tags updated by CI
-│   ├── argocd/         # AppProject + Application manifests
-│   ├── helm/           # Helm chart stubs
-│   └── database/       # PostgreSQL + Redis with PVCs
-├── .github/workflows/
-│   ├── ci.yml          # Test → build → push → update Kustomize overlay
-│   └── bootstrap-argocd.yml  # One-time manual ArgoCD install
-├── ops/                # Redirect stubs pointing to .github/workflows/
-├── seed.py             # Demo data generator
-├── start-dev.ps1       # Windows one-shot: local dev + k3s cluster + ArgoCD UI
-└── docker-compose.yml  # PostgreSQL + Redis for local dev
+```powershell
+# Unit tests — each service targets its own *_test database
+cd services/users    && python -m pytest tests/ -v
+cd services/orders   && python -m pytest tests/ -v
+cd services/payments && python -m pytest tests/ -v
+
+# Frontend unit tests (Vitest)
+cd frontend && npm test
+
+# E2E tests — requires all services running + seed data loaded
+cd frontend && npx playwright test
+cd frontend && npx playwright test --ui    # interactive
 ```
 
-Each service follows the same internal layout:
+RBAC tests are parametrized across all three protected endpoints: no token → 401, non-admin token → 403, admin token → 200. The `admin_headers`/`user_headers` fixtures generate JWTs directly without touching the database.
 
-```
-services/<name>/
-├── app/
-│   ├── main.py              # FastAPI app, lifespan (runs create_all), CORS
-│   ├── api/routes.py        # All endpoints
-│   ├── core/config.py       # pydantic-settings (reads .env)
-│   ├── db/session.py        # Async engine, session factory, get_db
-│   ├── models/<entity>.py   # SQLAlchemy ORM models
-│   └── schemas/<entity>.py  # Pydantic request/response schemas
-├── tests/
-│   ├── conftest.py          # engine, clean_tables, client fixtures
-│   └── test_<name>.py       # Full test suite
-├── Containerfile
-└── pyproject.toml
+---
+
+## Building Images
+
+The backend build context is `services/` (not `services/<name>/`) — the Containerfile copies both the service subdirectory and the shared module:
+
+```bash
+podman build -t fullstack/users:latest    -f services/users/Containerfile    services/
+podman build -t fullstack/orders:latest   -f services/orders/Containerfile   services/
+podman build -t fullstack/payments:latest -f services/payments/Containerfile services/
+podman build -t fullstack/frontend:latest -f frontend/Containerfile          frontend/
 ```
 
 ---
 
 ## API Reference
 
-### Users — :8001
+### Users `:8001`
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| POST | `/api/v1/users` | Register `{email, password}` |
-| GET | `/api/v1/users` | List users — `?skip=&limit=` |
-| GET | `/api/v1/users/{id}` | Get user |
-| PATCH | `/api/v1/users/{id}/status` | Toggle active/inactive |
-| POST | `/api/v1/auth/token` | Login — returns `{access_token, token_type}` |
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | — | Health check |
+| POST | `/api/v1/users` | — | Register `{email, password}` |
+| POST | `/api/v1/auth/token` | — | Login → access token + refresh cookie |
+| POST | `/api/v1/auth/refresh` | cookie | Rotate tokens |
+| POST | `/api/v1/auth/logout` | Bearer | Blocklist tokens, clear cookie |
+| GET | `/api/v1/users` | **admin** | List users |
+| GET | `/api/v1/users/{id}` | **admin** | Get user |
+| PATCH | `/api/v1/users/{id}/status` | **admin** | Toggle active/inactive |
 
-### Orders — :8002
+### Orders `:8002`
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| POST | `/api/v1/orders` | Create `{user_id, total}` |
-| GET | `/api/v1/orders` | List orders — `?skip=&limit=` |
-| GET | `/api/v1/orders/stats` | `{total, by_status, total_value}` |
-| GET | `/api/v1/orders/user/{user_id}` | Orders for a user |
-| GET | `/api/v1/orders/{id}` | Get order |
-| PATCH | `/api/v1/orders/{id}/status` | Update status |
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | — | Health check |
+| POST | `/api/v1/orders` | Bearer | Create `{user_id, total}` |
+| GET | `/api/v1/orders` | Bearer | List orders |
+| GET | `/api/v1/orders/stats` | Bearer | `{total, by_status, total_value}` |
+| GET | `/api/v1/orders/{id}` | Bearer | Get order |
+| PATCH | `/api/v1/orders/{id}/status` | Bearer | Update status |
 
-Order statuses: `pending → confirmed → shipped → delivered` or `cancelled`
+Statuses: `pending → confirmed → shipped → delivered` or `cancelled`
 
-### Payments — :8003
+### Payments `:8003`
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| POST | `/api/v1/payments` | Create `{order_id, amount}` |
-| GET | `/api/v1/payments` | List payments — `?skip=&limit=` |
-| GET | `/api/v1/payments/stats` | `{total, by_status, revenue}` — revenue is completed-only |
-| GET | `/api/v1/payments/{id}` | Get payment |
-| POST | `/api/v1/payments/{id}/process` | Mark completed, assign provider ref (idempotent) |
-| PATCH | `/api/v1/payments/{id}/status` | Set `pending`/`completed`/`failed`/`refunded` |
-
----
-
-## Testing
-
-Tests use `httpx.ASGITransport` (in-process — no running server required) against real PostgreSQL test databases. Each test starts with clean tables.
-
-```bash
-# One-time: create test databases
-podman exec fullstack-postgres psql -U postgres -c "CREATE DATABASE users_test;"
-podman exec fullstack-postgres psql -U postgres -c "CREATE DATABASE orders_test;"
-podman exec fullstack-postgres psql -U postgres -c "CREATE DATABASE payments_test;"
-
-# Run the full suite
-cd services/users    && python -m pytest tests/ -v   # 14 tests
-cd services/orders   && python -m pytest tests/ -v   # 16 tests
-cd services/payments && python -m pytest tests/ -v   # 19 tests
-
-# TDD watch mode — re-runs on every file save
-cd services/orders && ptw tests/
-```
-
-The `/orders/stats` and `/payments/stats` endpoints were built using strict red → green → refactor TDD.
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | — | Health check |
+| POST | `/api/v1/payments` | Bearer | Create `{order_id, amount}` |
+| GET | `/api/v1/payments` | Bearer | List payments |
+| GET | `/api/v1/payments/stats` | Bearer | `{total, by_status, revenue}` |
+| GET | `/api/v1/payments/{id}` | Bearer | Get payment |
+| POST | `/api/v1/payments/{id}/process` | Bearer | Mark completed (idempotent) |
+| PATCH | `/api/v1/payments/{id}/status` | Bearer | Set status |
 
 ---
 
 ## Deployment
 
-### Build images (Podman)
-
-```bash
-podman build -t fullstack/users:latest    -f services/users/Containerfile    services/users/
-podman build -t fullstack/orders:latest   -f services/orders/Containerfile   services/orders/
-podman build -t fullstack/payments:latest -f services/payments/Containerfile services/payments/
-podman build -t fullstack/frontend:latest -f frontend/Containerfile          frontend/
-```
-
-### Deploy to Kubernetes
-
-Cluster state is managed by ArgoCD — do not apply service manifests directly with `kubectl apply`. The CI pipeline writes image tags to the Kustomize overlay and ArgoCD syncs the cluster automatically.
-
-For a new cluster, apply postgres and create the secrets (not managed by ArgoCD since they contain credentials):
-
-```bash
-kubectl apply -f infra/database/postgres.yaml -n fullstack
-kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE users;"
-kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE orders;"
-kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE payments;"
-
-kubectl create secret generic postgres-secrets -n fullstack --from-literal=password=postgres
-for svc in users orders payments; do
-  kubectl create secret generic ${svc}-secrets -n fullstack \
-    --from-literal=database-url="postgresql+asyncpg://postgres:postgres@postgres.fullstack.svc.cluster.local:5432/${svc}"
-done
-```
-
-### CI/CD — GitHub Actions + ArgoCD
-
-CD is GitOps: the pipeline never runs `kubectl apply`. Instead it updates the Kustomize production overlay in Git and ArgoCD syncs the cluster automatically.
+CD is GitOps — the CI pipeline never runs `kubectl apply`. It writes new image SHAs to `infra/k8s/overlays/production/kustomization.yaml` and ArgoCD syncs the cluster automatically.
 
 ```
 Push to main
-    │
-    ├─ test            pytest against ephemeral PostgreSQL service container
-    ├─ build-push      docker build + push → ghcr.io/jaosullivan/webapp/<service>:<sha>
-    └─ update-manifests
-              kustomize edit set image → commit infra/k8s/overlays/production/kustomization.yaml
-                    │
-                    └─ ArgoCD detects the change → syncs cluster automatically
+    ├─ test (matrix)       pytest + real PostgreSQL + Redis
+    ├─ test-frontend       Vitest
+    ├─ test-e2e            real backends + Playwright
+    ├─ build-push          docker build → ghcr.io/jaosullivan/webapp/<svc>:<sha>
+    ├─ scan                Trivy CRITICAL scan (fails = no deploy)
+    └─ update-manifests    kustomize edit set image → git commit → ArgoCD sync
 ```
 
-| File | Purpose |
-|---|---|
-| `.github/workflows/ci.yml` | Test → build → push → update Kustomize overlay |
-| `.github/workflows/bootstrap-argocd.yml` | One-time `workflow_dispatch`: install ArgoCD + register Application |
-| `infra/argocd/project.yaml` | ArgoCD AppProject — scopes repo and namespaces |
-| `infra/argocd/apps/fullstack-app.yaml` | ArgoCD Application — auto-sync with prune + selfHeal |
-| `infra/k8s/overlays/production/kustomization.yaml` | Image tags written here by CI |
+**Required Kubernetes secrets** (applied imperatively — never committed):
 
-**ArgoCD bootstrap** (run once per cluster):
-
-```bash
-kubectl create namespace argocd
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.12.0/manifests/install.yaml
-
-# Allow kustomize to resolve ../../base paths
-kubectl patch configmap argocd-cm -n argocd --type merge \
-  -p '{"data":{"kustomize.buildOptions":"--load-restrictor LoadRestrictionsNone"}}'
-kubectl rollout restart deployment/argocd-repo-server -n argocd
-
-kubectl apply -f infra/argocd/project.yaml
-kubectl apply -f infra/argocd/apps/fullstack-app.yaml
+```powershell
+$kubectl = "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe"
+& $kubectl create secret generic shared-secrets -n fullstack `
+  --from-literal=secret-key=$(openssl rand -hex 32) --dry-run=client -o yaml | & $kubectl apply -f -
+@("users","orders","payments") | ForEach-Object {
+  & $kubectl create secret generic "${_}-secrets" -n fullstack `
+    --from-literal=database-url="postgresql+asyncpg://postgres:postgres@postgres.fullstack.svc.cluster.local:5432/$_" `
+    --dry-run=client -o yaml | & $kubectl apply -f -
+}
+& $kubectl create secret generic postgres-secrets -n fullstack --from-literal=password=postgres --dry-run=client -o yaml | & $kubectl apply -f -
+& $kubectl create secret generic grafana-admin -n fullstack --from-literal=admin-user=admin --from-literal=admin-password=admin --dry-run=client -o yaml | & $kubectl apply -f -
+& $kubectl create secret generic alertmanager-slack-secret -n fullstack --from-literal=SLACK_WEBHOOK_URL="https://hooks.slack.com/services/REPLACE_ME" --dry-run=client -o yaml | & $kubectl apply -f -
 ```
 
-**Local cluster (k3s in WSL2 Ubuntu):** `start-dev.ps1` handles k3s startup and kubeconfig refresh automatically. ArgoCD UI is available at `https://localhost:8080` (user: `admin`).
-
-**Secrets required for CI:**
-
-| Secret | Scope | Purpose |
-|---|---|---|
-| `GITHUB_TOKEN` | Auto-provided | Push to ghcr.io, commit manifest changes |
-| `KUBECONFIG` | GitHub Actions environment `production` | Bootstrap workflow only |
+See [`infra/docs/secret-rotation.md`](infra/docs/secret-rotation.md) for rotation procedures.
 
 ---
 
-## Environment Variables
+## Project Layout
 
-Each service reads config from environment variables or a `.env` file in the service directory.
+```
+fullstack/
+├── services/
+│   ├── users/          # FastAPI + Alembic + tests (auth, RBAC)
+│   ├── orders/         # FastAPI + Alembic + tests
+│   ├── payments/       # FastAPI + Alembic + tests
+│   └── shared/         # auth.py, redis.py, log.py, middleware.py, tracing.py
+├── frontend/
+│   ├── src/
+│   │   ├── lib/        # api.ts (axios + refresh), auth.ts (JWT decode + isAdmin)
+│   │   ├── pages/      # Dashboard, Users, Orders, Payments, Login
+│   │   └── components/ # Sidebar, Layout, ErrorBoundary, ui/ (shadcn)
+│   ├── e2e/            # Playwright: auth, dashboard, orders, users (RBAC), payments
+│   └── nginx.conf      # Port 8080, SPA fallback, /assets/* immutable cache
+├── infra/
+│   ├── k8s/
+│   │   ├── base/               # namespace, ingress (HTTPS + HSTS)
+│   │   ├── services/           # Deployments with init containers + securityContext
+│   │   ├── monitoring/         # Prometheus, Grafana, Loki, Promtail, Tempo, Alertmanager
+│   │   └── overlays/production # Kustomize — CI writes image SHAs here
+│   └── docs/secret-rotation.md
+├── .github/
+│   ├── workflows/ci.yml        # Full pipeline with Trivy scan
+│   └── dependabot.yml          # Weekly pip + npm + Actions updates
+├── seed.py
+├── start-dev.ps1               # Windows: everything in one command
+└── CLAUDE.md                   # AI assistant context — kept in sync
+```
 
-| Service | Variable | Default |
-|---|---|---|
-| users | `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/users` |
-| users | `SECRET_KEY` | `changeme-in-production` |
-| users | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` |
-| orders | `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/orders` |
-| orders | `USERS_SERVICE_URL` | `http://users:8000` |
-| payments | `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/payments` |
-| payments | `ORDERS_SERVICE_URL` | `http://orders:8000` |
+---
+
+## Tech Stack
+
+| | |
+|---|---|
+| **Backend** | Python 3.11, FastAPI, SQLAlchemy 2.x async, Alembic, Pydantic v2 |
+| **Auth** | python-jose HS256, bcrypt (direct), Redis blocklist, refresh token rotation |
+| **Frontend** | React 18, TypeScript 5, Vite, React Router v6, axios, Tailwind v4, shadcn/ui |
+| **Database** | PostgreSQL 16 (asyncpg), Redis 7 |
+| **Containers** | Podman, multi-stage Containerfiles, non-root uid 1001, readOnlyRootFilesystem |
+| **Orchestration** | Kubernetes (k3s locally), HPA, PDB, NetworkPolicy, cert-manager TLS |
+| **Observability** | Prometheus, Grafana, Loki, Tempo (OTel gRPC), Alertmanager + Slack |
+| **CI/CD** | GitHub Actions, Trivy scanning, ArgoCD GitOps, Dependabot |

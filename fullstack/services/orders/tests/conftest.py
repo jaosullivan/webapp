@@ -1,4 +1,8 @@
 import os
+import sys
+
+# Make `shared/` importable — two levels up from tests/ reaches services/
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/orders_test")
 
@@ -11,8 +15,10 @@ import app.models.order  # noqa: F401 — must import before app.main to registe
 from app.main import app as fastapi_app
 from app.db.session import get_db
 from app.db.base import Base
+from shared.auth import get_current_user_id
 
 _TEST_DB_URL = os.environ["DATABASE_URL"]
+_TEST_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -41,7 +47,11 @@ async def client(engine):
         async with factory() as session:
             yield session
 
+    async def override_auth():
+        return _TEST_USER_ID
+
     fastapi_app.dependency_overrides[get_db] = override_get_db
+    fastapi_app.dependency_overrides[get_current_user_id] = override_auth
     async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as c:
         yield c
     fastapi_app.dependency_overrides.clear()

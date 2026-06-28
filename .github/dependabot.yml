@@ -1,0 +1,48 @@
+version: 2
+updates:
+  # GitHub Actions — keep CI action versions current
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Users service Python dependencies
+  - package-ecosystem: pip
+    directory: /fullstack/services/users
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Orders service Python dependencies
+  - package-ecosystem: pip
+    directory: /fullstack/services/orders
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Payments service Python dependencies
+  - package-ecosystem: pip
+    directory: /fullstack/services/payments
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Frontend npm dependencies
+  - package-ecosystem: npm
+    directory: /fullstack/frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # Bundle minor/patch React ecosystem updates together
+      react-ecosystem:
+        patterns:
+          - "react*"
+          - "@types/react*"
+          - "vite*"
+          - "@vitejs/*"
+      tailwind:
+        patterns:
+          - "tailwindcss*"
+          - "@tailwindcss/*"

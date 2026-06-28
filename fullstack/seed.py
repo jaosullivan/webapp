@@ -6,7 +6,12 @@ USERS_URL = "http://localhost:8001/api/v1"
 ORDERS_URL = "http://localhost:8002/api/v1"
 PAYMENTS_URL = "http://localhost:8003/api/v1"
 
+ADMIN_EMAIL = "admin@example.com"
+ADMIN_PASSWORD = "admin123"
+
 SEED_USERS = [
+    # First user — must match INITIAL_ADMIN_EMAIL so it gets is_admin=True
+    (ADMIN_EMAIL, ADMIN_PASSWORD),
     ("alice@example.com", "password123"),
     ("bob@example.com", "password123"),
     ("carol@example.com", "password123"),
@@ -41,41 +46,69 @@ PAYMENT_STATUS_MAP = {
 }
 
 
+def _get_admin_token(client: httpx.Client) -> str:
+    r = client.post(
+        f"{USERS_URL}/auth/token",
+        data={"username": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+    )
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
 def seed():
     client = httpx.Client(timeout=10.0)
 
-    # Create users
-    user_ids = []
-    print("Creating users...")
+    # Register all users — POST /users is the public registration endpoint
+    user_ids: dict[str, str] = {}  # email -> id
+    print("Registering users...")
     for email, password in SEED_USERS:
         r = client.post(f"{USERS_URL}/users", json={"email": email, "password": password})
         if r.status_code == 201:
-            user_ids.append(r.json()["id"])
+            user_ids[email] = r.json()["id"]
             print(f"  + {email}")
         elif r.status_code == 400:
-            # Already exists — fetch ID via list
-            r2 = client.get(f"{USERS_URL}/users", params={"limit": 100})
-            match = next((u for u in r2.json()["items"] if u["email"] == email), None)
-            if match:
-                user_ids.append(match["id"])
-                print(f"  ~ {email} (already exists)")
+            print(f"  ~ {email} (already exists)")
         else:
             print(f"  ! {email} failed: {r.status_code} {r.text}")
 
-    if not user_ids:
+    # Authenticate as admin — required for user listing and all order/payment endpoints
+    print("\nAuthenticating as admin...")
+    try:
+        token = _get_admin_token(client)
+    except Exception as e:
+        print(f"  ! Login failed: {e}")
+        return
+    auth_headers = {"Authorization": f"Bearer {token}"}
+
+    # Resolve IDs for any user that already existed (not in user_ids yet)
+    missing = [e for e, _ in SEED_USERS if e not in user_ids]
+    if missing:
+        r = client.get(f"{USERS_URL}/users", params={"limit": 100}, headers=auth_headers)
+        if r.status_code == 200:
+            for u in r.json()["items"]:
+                if u["email"] in missing:
+                    user_ids[u["email"]] = u["id"]
+                    print(f"  ~ resolved ID for {u['email']}")
+
+    ordered_ids = [user_ids[e] for e, _ in SEED_USERS if e in user_ids]
+    if not ordered_ids:
         print("No users available — aborting.")
         return
 
-    # Create orders and payments
-    print(f"\nCreating orders and payments for {len(user_ids)} users...")
+    # Create orders and payments using admin token
+    print(f"\nCreating orders and payments for {len(ordered_ids)} users...")
     order_count = 0
     payment_count = 0
 
-    for user_id in user_ids:
+    for user_id in ordered_ids:
         num_orders = random.randint(2, 5)
         for _ in range(num_orders):
             total = round(random.choice(ORDER_TOTALS) + random.uniform(-5, 20), 2)
-            r = client.post(f"{ORDERS_URL}/orders", json={"user_id": user_id, "total": total})
+            r = client.post(
+                f"{ORDERS_URL}/orders",
+                json={"user_id": user_id, "total": total},
+                headers=auth_headers,
+            )
             if r.status_code != 201:
                 print(f"  ! order failed: {r.status_code}")
                 continue
@@ -88,34 +121,45 @@ def seed():
             status_flow = random.choice(ORDER_STATUS_FLOW)
             final_status = status_flow[-1]
             for status in status_flow:
-                client.patch(f"{ORDERS_URL}/orders/{order_id}/status", json={"status": status})
+                client.patch(
+                    f"{ORDERS_URL}/orders/{order_id}/status",
+                    json={"status": status},
+                    headers=auth_headers,
+                )
 
             # Create a payment for non-cancelled orders
             if final_status != "cancelled":
-                pr = client.post(f"{PAYMENTS_URL}/payments", json={"order_id": order_id, "amount": total})
+                pr = client.post(
+                    f"{PAYMENTS_URL}/payments",
+                    json={"order_id": order_id, "amount": total},
+                    headers=auth_headers,
+                )
                 if pr.status_code != 201:
                     continue
                 payment_id = pr.json()["id"]
                 payment_count += 1
 
-                # Set payment status based on order status
                 pay_status = PAYMENT_STATUS_MAP.get(final_status, "pending")
                 if isinstance(pay_status, list):
                     pay_status = random.choice(pay_status)
                 if pay_status == "completed":
-                    client.post(f"{PAYMENTS_URL}/payments/{payment_id}/process")
+                    client.post(f"{PAYMENTS_URL}/payments/{payment_id}/process", headers=auth_headers)
                 elif pay_status == "failed":
-                    client.patch(f"{PAYMENTS_URL}/payments/{payment_id}/status", json={"status": "failed"})
+                    client.patch(
+                        f"{PAYMENTS_URL}/payments/{payment_id}/status",
+                        json={"status": "failed"},
+                        headers=auth_headers,
+                    )
 
     print(f"\nDone! Created:")
-    print(f"  {len(user_ids)} users")
+    print(f"  {len(ordered_ids)} users")
     print(f"  {order_count} orders")
     print(f"  {payment_count} payments")
 
     # Print summary stats
-    r = client.get(f"{USERS_URL}/users", params={"limit": 1})
-    r2 = client.get(f"{ORDERS_URL}/orders", params={"limit": 1})
-    r3 = client.get(f"{PAYMENTS_URL}/payments", params={"limit": 200})
+    r = client.get(f"{USERS_URL}/users", params={"limit": 1}, headers=auth_headers)
+    r2 = client.get(f"{ORDERS_URL}/orders", params={"limit": 1}, headers=auth_headers)
+    r3 = client.get(f"{PAYMENTS_URL}/payments", params={"limit": 200}, headers=auth_headers)
     revenue = sum(p["amount"] for p in r3.json()["items"] if p["status"] == "completed")
     print(f"\nDashboard will show:")
     print(f"  Total users:    {r.json()['total']}")

@@ -3,17 +3,18 @@ import { payments as paymentsApi, type Payment } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Zap } from "lucide-react";
 
 const PAGE_SIZE = 20;
 
-const STATUS_VARIANTS: Record<Payment["status"], "default" | "success" | "warning" | "destructive" | "secondary"> = {
-  pending: "warning",
+type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info";
+
+const STATUS_VARIANTS: Record<Payment["status"], BadgeVariant> = {
+  pending:   "warning",
   completed: "success",
-  failed: "destructive",
-  refunded: "secondary",
+  failed:    "destructive",
+  refunded:  "secondary",
 };
 
 export function PaymentsPage() {
@@ -40,69 +41,106 @@ export function PaymentsPage() {
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 max-w-6xl">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Payments</h2>
-        <p className="text-sm text-muted-foreground">{total} total</p>
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Payments</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">{total.toLocaleString()} total</p>
+        </div>
       </div>
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Payment ID</TableHead>
-                <TableHead>Order ID</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Provider Ref</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading
-                ? Array.from({ length: 5 }).map((_, i) => (
-                    <TableRow key={i}>
-                      {Array.from({ length: 7 }).map((_, j) => (
-                        <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
-                      ))}
-                    </TableRow>
-                  ))
-                : items.map((payment) => (
-                    <TableRow key={payment.id}>
-                      <TableCell className="font-mono text-xs">{payment.id.slice(0, 8)}…</TableCell>
-                      <TableCell className="font-mono text-xs">{payment.order_id.slice(0, 8)}…</TableCell>
-                      <TableCell>${payment.amount.toFixed(2)}</TableCell>
-                      <TableCell>
-                        <Badge variant={STATUS_VARIANTS[payment.status]}>{payment.status}</Badge>
+
+      <div className="rounded-xl border border-[var(--border)] bg-card overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-b border-[var(--border)] hover:bg-transparent">
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold pl-5">Payment ID</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Order</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Amount</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Status</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Provider Ref</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Created</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold text-right pr-5">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={i} className="border-b border-[var(--border)]/50">
+                    {Array.from({ length: 7 }).map((_, j) => (
+                      <TableCell key={j} className="first:pl-5 last:pr-5">
+                        <Skeleton className="h-3.5 w-full bg-secondary/60" />
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {payment.provider_ref ? `${payment.provider_ref.slice(0, 8)}…` : "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(payment.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {payment.status === "pending" && (
-                          <Button size="sm" onClick={() => processPayment(payment.id)}>
-                            Process
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                    ))}
+                  </TableRow>
+                ))
+              : items.map((payment, idx) => (
+                  <TableRow
+                    key={payment.id}
+                    className={`border-b border-[var(--border)]/50 transition-colors hover:bg-[oklch(0.19_0_0)] ${
+                      idx % 2 === 0 ? "" : "bg-[oklch(0.155_0_0)]"
+                    }`}
+                  >
+                    <TableCell className="font-mono text-xs text-muted-foreground pl-5">
+                      {payment.id.slice(0, 8)}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {payment.order_id.slice(0, 8)}
+                    </TableCell>
+                    <TableCell className="font-mono text-sm font-medium">
+                      ${payment.amount.toFixed(2)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={STATUS_VARIANTS[payment.status]}>{payment.status}</Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {payment.provider_ref ? payment.provider_ref.slice(0, 12) + "…" : (
+                        <span className="text-muted-foreground/40">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {new Date(payment.created_at).toLocaleDateString("en-US", {
+                        year: "numeric", month: "short", day: "numeric",
+                      })}
+                    </TableCell>
+                    <TableCell className="text-right pr-5">
+                      {payment.status === "pending" && (
+                        <button
+                          onClick={() => processPayment(payment.id)}
+                          className="inline-flex items-center gap-1.5 rounded-md bg-primary/20 border border-primary/30 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/30 transition-colors"
+                        >
+                          <Zap className="h-3 w-3 fill-primary" />
+                          Process
+                        </button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+          </TableBody>
+        </Table>
+      </div>
+
       {totalPages > 1 && (
         <div className="flex items-center justify-end gap-2">
-          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-            <ChevronLeft className="h-4 w-4" />
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={page === 0}
+            onClick={() => setPage((p) => p - 1)}
+            className="h-7 w-7 p-0 border border-[var(--border)]"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
           </Button>
-          <span className="text-sm text-muted-foreground">Page {page + 1} of {totalPages}</span>
-          <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>
-            <ChevronRight className="h-4 w-4" />
+          <span className="text-xs text-muted-foreground font-mono">
+            {page + 1} / {totalPages}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={page >= totalPages - 1}
+            onClick={() => setPage((p) => p + 1)}
+            className="h-7 w-7 p-0 border border-[var(--border)]"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
           </Button>
         </div>
       )}

@@ -3,16 +3,17 @@ import { orders as ordersApi, type Order } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 
 const PAGE_SIZE = 20;
 
-const STATUS_VARIANTS: Record<Order["status"], "default" | "success" | "warning" | "destructive" | "secondary"> = {
-  pending: "warning",
-  confirmed: "default",
-  shipped: "secondary",
+type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info";
+
+const STATUS_VARIANTS: Record<Order["status"], BadgeVariant> = {
+  pending:   "warning",
+  confirmed: "info",
+  shipped:   "default",
   delivered: "success",
   cancelled: "destructive",
 };
@@ -43,47 +44,73 @@ export function OrdersPage() {
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 max-w-6xl">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Orders</h2>
-        <p className="text-sm text-muted-foreground">{total} total</p>
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Orders</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">{total.toLocaleString()} total</p>
+        </div>
       </div>
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Order ID</TableHead>
-                <TableHead>User ID</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right">Update Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading
-                ? Array.from({ length: 5 }).map((_, i) => (
-                    <TableRow key={i}>
-                      {Array.from({ length: 6 }).map((_, j) => (
-                        <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
-                      ))}
-                    </TableRow>
-                  ))
-                : items.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-mono text-xs">{order.id.slice(0, 8)}…</TableCell>
-                      <TableCell className="font-mono text-xs">{order.user_id.slice(0, 8)}…</TableCell>
-                      <TableCell>${order.total.toFixed(2)}</TableCell>
-                      <TableCell>
-                        <Badge variant={STATUS_VARIANTS[order.status]}>{order.status}</Badge>
+
+      <div className="rounded-xl border border-[var(--border)] bg-card overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-b border-[var(--border)] hover:bg-transparent">
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold pl-5">Order ID</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">User</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Total</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Status</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Created</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold text-right pr-5">Update</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={i} className="border-b border-[var(--border)]/50">
+                    {Array.from({ length: 6 }).map((_, j) => (
+                      <TableCell key={j} className="first:pl-5 last:pr-5">
+                        <Skeleton className="h-3.5 w-full bg-secondary/60" />
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(order.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-right">
+                    ))}
+                  </TableRow>
+                ))
+              : items.map((order, idx) => (
+                  <TableRow
+                    key={order.id}
+                    className={`border-b border-[var(--border)]/50 transition-colors hover:bg-[oklch(0.19_0_0)] ${
+                      idx % 2 === 0 ? "" : "bg-[oklch(0.155_0_0)]"
+                    }`}
+                  >
+                    <TableCell className="font-mono text-xs text-muted-foreground pl-5">
+                      {order.id.slice(0, 8)}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {order.user_id.slice(0, 8)}
+                    </TableCell>
+                    <TableCell className="font-mono text-sm font-medium">
+                      ${order.total.toFixed(2)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={STATUS_VARIANTS[order.status]}>{order.status}</Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {new Date(order.created_at).toLocaleDateString("en-US", {
+                        year: "numeric", month: "short", day: "numeric",
+                      })}
+                    </TableCell>
+                    <TableCell className="text-right pr-5">
+                      {/* Overlay a styled badge with a transparent native select for zero-dependency custom dropdown */}
+                      <div className="relative inline-flex items-center gap-1 cursor-pointer group">
+                        <Badge
+                          variant={STATUS_VARIANTS[order.status]}
+                          className="cursor-pointer group-hover:opacity-80 transition-opacity pr-1.5"
+                        >
+                          {order.status}
+                          <ChevronDown className="h-2.5 w-2.5 ml-1 opacity-60" />
+                        </Badge>
                         <select
-                          className="text-sm border rounded-md px-2 py-1 bg-background"
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full"
                           value={order.status}
                           onChange={(e) => changeStatus(order.id, e.target.value)}
                         >
@@ -91,21 +118,36 @@ export function OrdersPage() {
                             <option key={s} value={s}>{s}</option>
                           ))}
                         </select>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+          </TableBody>
+        </Table>
+      </div>
+
       {totalPages > 1 && (
         <div className="flex items-center justify-end gap-2">
-          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-            <ChevronLeft className="h-4 w-4" />
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={page === 0}
+            onClick={() => setPage((p) => p - 1)}
+            className="h-7 w-7 p-0 border border-[var(--border)]"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
           </Button>
-          <span className="text-sm text-muted-foreground">Page {page + 1} of {totalPages}</span>
-          <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>
-            <ChevronRight className="h-4 w-4" />
+          <span className="text-xs text-muted-foreground font-mono">
+            {page + 1} / {totalPages}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={page >= totalPages - 1}
+            onClick={() => setPage((p) => p + 1)}
+            className="h-7 w-7 p-0 border border-[var(--border)]"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
           </Button>
         </div>
       )}

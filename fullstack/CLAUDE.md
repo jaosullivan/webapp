@@ -20,31 +20,35 @@ GitHub: https://github.com/jaosullivan/webapp/tree/main/fullstack
 fullstack/
 ├── .vscode/                   # settings.json, launch.json, extensions.json
 ├── services/
-│   ├── users/                 # FastAPI — registration, JWT auth (port 8001)
+│   ├── users/                 # FastAPI — registration, JWT auth, RBAC (port 8001)
 │   ├── orders/                # FastAPI — order lifecycle (port 8002)
 │   ├── payments/              # FastAPI — payment processing (port 8003)
-│   └── shared/                # Shared JWT bearer extractor
+│   └── shared/                # Shared auth (get_current_user_id, require_admin), redis, log, middleware, tracing
 ├── frontend/                  # React 18 + TypeScript + Vite admin dashboard (port 3000)
+│   ├── e2e/                   # Playwright E2E tests (auth, dashboard, orders, users, payments)
+│   ├── nginx.conf             # nginx-unprivileged config: port 8080, asset caching, SPA fallback
+│   └── Containerfile          # Multi-stage: node builder → nginxinc/nginx-unprivileged:alpine (port 8080)
 ├── infra/
 │   ├── k8s/
-│   │   ├── base/              # namespace.yaml, ingress.yaml (nginx class — left as-is for production)
-│   │   ├── services/          # Deployment + Service per workload
+│   │   ├── base/              # namespace.yaml, ingress.yaml (HTTPS redirect + HSTS enforced)
+│   │   ├── services/          # Deployment + Service per workload (securityContext, init containers)
+│   │   ├── monitoring/        # Prometheus, Grafana, Loki, Promtail, Tempo, Alertmanager
 │   │   ├── overlays/
 │   │   │   └── production/    # Kustomize overlay — CI writes image tags here
 │   │   └── secrets/           # Managed manually out-of-band, never committed
 │   ├── argocd/
 │   │   ├── project.yaml       # ArgoCD AppProject
 │   │   └── apps/fullstack-app.yaml  # ArgoCD Application — auto-syncs production overlay
-│   ├── helm/                  # Helm chart stubs (not yet populated)
+│   ├── docs/
+│   │   └── secret-rotation.md # Runbook: JWT, DB passwords, Grafana, Slack webhook rotation
 │   └── database/              # postgres.yaml, redis.yaml with PVCs
-├── ops/
-│   ├── ci/ci.yml              # Redirect stub → .github/workflows/ci.yml
-│   └── cd/bootstrap-argocd.yml # Redirect stub → .github/workflows/bootstrap-argocd.yml
-├── .github/workflows/
-│   ├── ci.yml                 # Active: pytest matrix → Podman build → ghcr.io push → kustomize update
-│   └── bootstrap-argocd.yml   # Active: one-time manual workflow to bootstrap ArgoCD on a cluster
-├── seed.py                    # Populates demo data via service APIs
-├── start-dev.ps1              # One-shot: Podman containers + services + frontend + k3s + ArgoCD UI
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml             # test → build → scan (Trivy) → update-manifests → ArgoCD sync
+│   │   └── bootstrap-argocd.yml
+│   └── dependabot.yml         # Weekly updates: pip (3 services) + npm (frontend) + GitHub Actions
+├── seed.py                    # Demo data via APIs — authenticates as admin before order/payment creation
+├── start-dev.ps1              # One-shot: Podman + services + frontend + k3s + port-forwards
 └── docker-compose.yml         # PostgreSQL 16 + Redis 7 for local dev (use Podman)
 ```
 
@@ -54,16 +58,18 @@ fullstack/
 
 | Layer | Technology |
 |---|---|
-| Backend | Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2.x (async) |
-| Auth | `python-jose` (JWT) + `bcrypt` (direct, not passlib — incompatible with bcrypt 5.x) |
+| Backend | Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2.x (async), Alembic |
+| Auth | `python-jose` HS256 JWT (15 min access + 7 day refresh), `bcrypt` (direct, not passlib) |
+| RBAC | `is_admin` User field; `require_admin` FastAPI dependency; `INITIAL_ADMIN_EMAIL` bootstrap |
 | Frontend | React 18, TypeScript 5, Vite 8, React Router v6, axios |
 | UI Components | shadcn/ui (manual, no CLI) + Tailwind CSS v4 + lucide-react |
-| Primary DB | PostgreSQL 16 (`asyncpg`) |
-| Cache | Redis 7 |
-| Container | Podman / Containerfile |
-| Orchestration | Kubernetes (k3s locally, any cluster in production) |
-| CI/CD | GitHub Actions (`.github/workflows/`) + ArgoCD GitOps |
-| Testing | pytest + pytest-asyncio + httpx (ASGITransport) + pytest-watch |
+| Primary DB | PostgreSQL 16 (`asyncpg` async, `psycopg2-binary` for Alembic migrations) |
+| Cache / Blocklist | Redis 7 — refresh token rotation + JWT blocklist (`blocklist:{token}` keys with TTL) |
+| Observability | Prometheus + Grafana dashboard + Loki + Promtail + Tempo (OTel tracing) + Alertmanager |
+| Container | Podman / Containerfile — multi-stage, non-root user 1001, `readOnlyRootFilesystem` |
+| Orchestration | Kubernetes (k3s locally) — HPA, PDB, NetworkPolicy, securityContext, init containers |
+| CI/CD | GitHub Actions → Trivy scan → ArgoCD GitOps |
+| Testing | pytest + pytest-asyncio + httpx (ASGITransport) + Playwright E2E |
 
 ---
 
@@ -71,40 +77,42 @@ fullstack/
 
 ### Users service — port 8001
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| POST | `/api/v1/users` | Register user (`{email, password}`) |
-| GET | `/api/v1/users` | List users (`?skip=&limit=`) |
-| GET | `/api/v1/users/{id}` | Get user |
-| PATCH | `/api/v1/users/{id}/status` | Toggle active/inactive |
-| POST | `/api/v1/auth/token` | Login — returns JWT (`application/x-www-form-urlencoded`) |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | — | Health check |
+| POST | `/api/v1/users` | — | Register user (`{email, password}`) |
+| POST | `/api/v1/auth/token` | — | Login — returns access token + sets refresh cookie |
+| POST | `/api/v1/auth/refresh` | refresh cookie | Rotate tokens (rate limited 20/min) |
+| POST | `/api/v1/auth/logout` | Bearer | Blocklist both tokens, clear cookie |
+| GET | `/api/v1/users` | **admin** | List users (`?skip=&limit=`) |
+| GET | `/api/v1/users/{id}` | **admin** | Get user |
+| PATCH | `/api/v1/users/{id}/status` | **admin** | Toggle active/inactive |
 
 ### Orders service — port 8002
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| POST | `/api/v1/orders` | Create order (`{user_id, total}`) |
-| GET | `/api/v1/orders` | List orders (`?skip=&limit=`) |
-| GET | `/api/v1/orders/stats` | Aggregate stats — total, by_status, total_value |
-| GET | `/api/v1/orders/user/{user_id}` | Orders for a user |
-| GET | `/api/v1/orders/{id}` | Get order |
-| PATCH | `/api/v1/orders/{id}/status` | Update status (`{status}`) |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | — | Health check |
+| POST | `/api/v1/orders` | Bearer | Create order (`{user_id, total}`) |
+| GET | `/api/v1/orders` | Bearer | List orders (`?skip=&limit=`) |
+| GET | `/api/v1/orders/stats` | Bearer | Aggregate stats — total, by_status, total_value |
+| GET | `/api/v1/orders/user/{user_id}` | Bearer | Orders for a user |
+| GET | `/api/v1/orders/{id}` | Bearer | Get order |
+| PATCH | `/api/v1/orders/{id}/status` | Bearer | Update status (`{status}`) |
 
 Order statuses: `pending` → `confirmed` → `shipped` → `delivered` | `cancelled`
 
 ### Payments service — port 8003
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| POST | `/api/v1/payments` | Create payment (`{order_id, amount}`) |
-| GET | `/api/v1/payments` | List payments (`?skip=&limit=`) |
-| GET | `/api/v1/payments/stats` | Aggregate stats — total, by_status, revenue (completed only) |
-| GET | `/api/v1/payments/{id}` | Get payment |
-| POST | `/api/v1/payments/{id}/process` | Mark completed, assign provider_ref (idempotent) |
-| PATCH | `/api/v1/payments/{id}/status` | Set status (`pending`/`completed`/`failed`/`refunded`) |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | — | Health check |
+| POST | `/api/v1/payments` | Bearer | Create payment (`{order_id, amount}`) |
+| GET | `/api/v1/payments` | Bearer | List payments (`?skip=&limit=`) |
+| GET | `/api/v1/payments/stats` | Bearer | Aggregate stats — total, by_status, revenue |
+| GET | `/api/v1/payments/{id}` | Bearer | Get payment |
+| POST | `/api/v1/payments/{id}/process` | Bearer | Mark completed, assign provider_ref (idempotent) |
+| PATCH | `/api/v1/payments/{id}/status` | Bearer | Set status |
 
 ---
 
@@ -113,22 +121,44 @@ Order statuses: `pending` → `confirmed` → `shipped` → `delivered` | `cance
 ```
 services/<name>/
 ├── app/
-│   ├── main.py            # FastAPI app + lifespan (runs create_all) + CORS
+│   ├── main.py            # FastAPI app + lifespan (create_all) + CORS + rate limiter + OTel
 │   ├── api/routes.py      # All endpoints — call get_db directly, no repo layer
 │   ├── core/
 │   │   ├── config.py      # pydantic-settings BaseSettings (reads .env)
-│   │   └── security.py    # JWT encode/decode (users service only)
+│   │   ├── limiter.py     # slowapi rate limiter instance
+│   │   └── security.py    # JWT encode/decode (users service only); create_access_token(is_admin=)
 │   ├── db/
 │   │   ├── base.py        # DeclarativeBase
 │   │   └── session.py     # create_async_engine, AsyncSessionLocal, get_db, init_db
 │   ├── models/<entity>.py # SQLAlchemy ORM models
 │   └── schemas/<entity>.py# Pydantic request/response schemas
+├── migrations/
+│   ├── env.py             # Alembic env — swaps asyncpg → psycopg2 for sync migration runner
+│   ├── script.py.mako
+│   └── versions/          # Migration files (0001_initial_schema.py, 0002_add_is_admin.py, …)
 ├── tests/
-│   ├── conftest.py        # engine fixture, clean_tables autouse, client fixture
-│   └── test_<name>.py     # Full test suite
-├── Containerfile
+│   ├── conftest.py        # engine, clean_tables, client, admin_headers, user_headers fixtures
+│   └── test_<name>.py     # Full test suite including RBAC 401/403 parametrized tests
+├── alembic.ini
+├── Containerfile          # Multi-stage: builder (--prefix=/deps) → runtime (non-root uid 1001)
 └── pyproject.toml
 ```
+
+---
+
+## Auth Architecture
+
+**Access tokens**: HS256 JWT, 15-minute TTL, payload `{sub, exp, admin}`. Sent as `Authorization: Bearer`.
+
+**Refresh tokens**: HS256 JWT, 7-day TTL, payload `{sub, exp, type:"refresh"}`. Set as `HttpOnly; SameSite=Lax; Path=/api/v1/auth` cookie. **Rotated on every use** — old refresh token is blocklisted on each successful refresh.
+
+**Redis blocklist**: both token types are added to `blocklist:{token}` with a TTL matching the token's remaining lifetime on logout. The `get_current_user_id` and `require_admin` dependencies check the blocklist on every request.
+
+**RBAC**: `require_admin` (`shared/auth.py`) decodes the bearer token, checks `payload.get("admin", False)`, raises 403 if False. The `admin` claim is set at login time using `user.is_admin` from the DB. Token refresh re-fetches `is_admin` from the DB so promotions/demotions take effect on the next refresh.
+
+**Admin bootstrap**: set `INITIAL_ADMIN_EMAIL` env var on the users service. The first `POST /api/v1/users` call with that email gets `is_admin=True` automatically. In production k8s this is `admin@example.com` (see `users.yaml`). For local dev, `start-dev.ps1` sets this env var on the users process.
+
+**Frontend auth flow**: `api.ts` uses a single `_refreshPromise` to deduplicate concurrent 401 → refresh calls. If the refresh endpoint itself returns 401, the interceptor clears the token and redirects to `/login`. `src/lib/auth.ts` provides `isAdmin()` which base64-decodes the JWT payload from localStorage — used by `RequireAdmin` route guard and the conditional Users link in the Sidebar.
 
 ---
 
@@ -147,7 +177,7 @@ services/<name>/
 .\start-dev.ps1
 ```
 
-This starts Podman containers, all three backend services in terminal windows, the Vite dev server, and the local k3s cluster with an ArgoCD port-forward at `https://localhost:8080`.
+Starts Podman containers, all three backend services (with `INITIAL_ADMIN_EMAIL=admin@example.com`), Vite dev server, k3s cluster in WSL2, and port-forwards for ArgoCD (`:8080`), Grafana (`:3001`), and Prometheus (`:9090`).
 
 ### Manual startup
 
@@ -155,15 +185,15 @@ This starts Podman containers, all three backend services in terminal windows, t
 # Start Podman containers
 podman start fullstack-postgres fullstack-redis
 
-# Per-service
-cd services/users
-pip install -e ".[dev]"
-python -m uvicorn app.main:app --reload --port 8001
+# Per-service — set PYTHONPATH so `import shared` resolves
+$env:PYTHONPATH = "C:\MSDE\Webapp\fullstack\services"
+$env:INITIAL_ADMIN_EMAIL = "admin@example.com"  # users service only
+cd services/users && python -m uvicorn app.main:app --reload --port 8001
+cd services/orders && python -m uvicorn app.main:app --reload --port 8002
+cd services/payments && python -m uvicorn app.main:app --reload --port 8003
 
 # Frontend
-cd frontend
-npm install
-npm run dev    # http://localhost:3000
+cd frontend && npm run dev    # http://localhost:3000
 ```
 
 ### Seed demo data
@@ -173,7 +203,7 @@ npm run dev    # http://localhost:3000
 python seed.py
 ```
 
-Creates 10 users, ~35 orders across all statuses, ~30 payments (mix of completed/pending/failed).
+Creates 11 users (admin@example.com gets `is_admin=True`), ~35 orders, ~30 payments. The script logs in as admin before calling any protected endpoints (order/payment creation and listing all require a JWT).
 
 ### Run tests
 
@@ -181,50 +211,121 @@ Creates 10 users, ~35 orders across all statuses, ~30 payments (mix of completed
 cd services/users    && python -m pytest tests/ -v
 cd services/orders   && python -m pytest tests/ -v
 cd services/payments && python -m pytest tests/ -v
-
-# Watch mode (re-runs on file save — TDD workflow)
-python -m pytest_watch tests/
 ```
 
-Tests use real PostgreSQL (`users_test`, `orders_test`, `payments_test` databases).
-Tables are truncated between each test for isolation.
+Tests use real PostgreSQL (`users_test`, `orders_test`, `payments_test`). Tables are truncated between each test. `admin_headers`/`user_headers` fixtures in conftest generate JWTs directly (no DB writes) so user-count assertions are not affected.
+
+### Run E2E tests
+
+```powershell
+# Requires all three services running on :8001/:8002/:8003 and seed data loaded
+cd frontend
+npx playwright test            # headless
+npx playwright test --ui       # interactive UI mode
+```
 
 ---
 
 ## Building Images (Podman)
 
+The build context for backend services is `services/` (not `services/<name>/`) because the Containerfile copies both the service subdirectory and `shared/`:
+
 ```bash
-podman build -t fullstack/users:latest    -f services/users/Containerfile    services/users/
-podman build -t fullstack/orders:latest   -f services/orders/Containerfile   services/orders/
-podman build -t fullstack/payments:latest -f services/payments/Containerfile services/payments/
+# From fullstack/
+podman build -t fullstack/users:latest    -f services/users/Containerfile    services/
+podman build -t fullstack/orders:latest   -f services/orders/Containerfile   services/
+podman build -t fullstack/payments:latest -f services/payments/Containerfile services/
 podman build -t fullstack/frontend:latest -f frontend/Containerfile          frontend/
 ```
 
-Images tagged `fullstack/<service>:<git-sha>` in CI.
+All backend images: multi-stage (builder installs deps to `--prefix=/deps`, runtime copies `/deps` to `/usr/local`), non-root user/group `app` (uid/gid 1001), `PYTHONDONTWRITEBYTECODE=1`. Alembic files (`alembic.ini`, `migrations/`) are included so the init container can run migrations.
+
+Frontend: `nginxinc/nginx-unprivileged:alpine` serving on port 8080 with a custom `nginx.conf` (aggressive caching for hashed `/assets/*`, no-cache for `index.html`).
 
 ---
 
 ## Kubernetes
 
-Cluster state is managed by ArgoCD — do not `kubectl apply` the service manifests directly. ArgoCD watches `infra/k8s/overlays/production` and syncs automatically on every Git change.
+Cluster state is managed by ArgoCD — do not `kubectl apply` the service manifests directly.
 
-**Ingress** uses `ingressClassName: nginx`. On the local k3s cluster (which uses Traefik) this resource exists but is ignored — access services via `kubectl port-forward` instead. On a production cluster with an NGINX ingress controller, Ingress routes `fullstack.local` traffic to each service.
+**Security posture** (all backend + frontend pods):
+- Pod-level: `runAsNonRoot: true`, `runAsUser: 1001` (101 for nginx-unprivileged)
+- Container-level: `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities: {drop: [ALL]}`
+- Backend pods have a `/tmp` emptyDir; frontend pod has `/var/cache/nginx`, `/var/run`, `/tmp` emptyDirs
 
-**In-cluster postgres** (local cluster only — not managed by ArgoCD):
-```bash
-kubectl apply -f infra/database/postgres.yaml -n fullstack
-kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE users;"
-kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE orders;"
-kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABASE payments;"
+**Alembic init containers**: each backend Deployment has an `initContainers.migrate` that runs `alembic upgrade head` before the app starts, using the same image and DATABASE_URL secret. This ensures schema migrations are applied before traffic reaches the new version.
+
+**Ingress**: `ingressClassName: nginx` routing `fullstack.local`. TLS via cert-manager. HTTPS redirect and HSTS (1 year) enforced via annotations.
+
+**NGINX ingress controller** (installed on local k3s):
+```powershell
+$env:KUBECONFIG = "C:\Users\johna\.kube\k3s-config.yaml"
+helm install ingress-nginx ingress-nginx/ingress-nginx `
+    --namespace ingress-nginx --create-namespace `
+    --set controller.admissionWebhooks.enabled=false `
+    --set controller.service.type=NodePort
+```
+
+**Monitoring** (deployed in `fullstack` namespace):
+- Prometheus scrapes `/metrics` from all three services (prometheus-fastapi-instrumentator)
+- Grafana auto-provisions "Fullstack — Service Overview" dashboard + Loki + Tempo datasources
+- Loki + Promtail collect structured JSON logs from all pods
+- Tempo receives OTel traces from services via gRPC on port 4317
+- Alertmanager sends Slack alerts (webhook URL in `alertmanager-slack-secret`)
+
+```powershell
+& $kubectl port-forward svc/prometheus  -n fullstack 9090:9090
+& $kubectl port-forward svc/grafana     -n fullstack 3001:3000
+& $kubectl port-forward svc/tempo       -n fullstack 3200:3200
+```
+
+**PostgreSQL backups**: `postgres-backup` CronJob runs daily at 02:00 UTC, dumps all three databases with `pg_dump | gzip`, retains 7 days on a 5Gi PVC.
+
+**In-cluster secrets** (apply imperatively after cluster restart — never committed to Git):
+```powershell
+$kubectl = "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe"
+# Shared JWT secret
+& $kubectl create secret generic shared-secrets -n fullstack --from-literal=secret-key=$(openssl rand -hex 32) --dry-run=client -o yaml | & $kubectl apply -f -
+# Per-service DB URLs
+@("users","orders","payments") | ForEach-Object {
+  $url = "postgresql+asyncpg://postgres:postgres@postgres.fullstack.svc.cluster.local:5432/$_"
+  & $kubectl create secret generic "${_}-secrets" -n fullstack --from-literal=database-url=$url --dry-run=client -o yaml | & $kubectl apply -f -
+}
+# Postgres password (used by backup CronJob)
+& $kubectl create secret generic postgres-secrets -n fullstack --from-literal=password=postgres --dry-run=client -o yaml | & $kubectl apply -f -
+# Grafana admin credentials
+& $kubectl create secret generic grafana-admin -n fullstack --from-literal=admin-user=admin --from-literal=admin-password=admin --dry-run=client -o yaml | & $kubectl apply -f -
+# Alertmanager Slack webhook
+& $kubectl create secret generic alertmanager-slack-secret -n fullstack --from-literal=SLACK_WEBHOOK_URL="https://hooks.slack.com/services/REPLACE_ME" --dry-run=client -o yaml | & $kubectl apply -f -
+```
+
+See `infra/docs/secret-rotation.md` for the full rotation procedure.
+
+**ArgoCD kustomize config** (already patched — survives restarts):
+- `argocd-cm` ConfigMap has `kustomize.buildOptions: --load-restrictor LoadRestrictionsNone`
+
+### Local cluster (k3s in WSL2 Ubuntu)
+
+**Kubeconfig**: `C:\Users\johna\.kube\k3s-config.yaml`  
+**kubectl**: `C:\Program Files\Docker\Docker\resources\bin\kubectl.exe`
+
+The WSL2 NIC IP changes on each restart. `start-dev.ps1` refreshes it automatically. Manual refresh:
+```powershell
+$wslIp = (wsl -d Ubuntu -u root -- hostname -I) -split '\s+' | Select-Object -First 1
+(Get-Content "C:\Users\johna\.kube\k3s-config.yaml" -Raw) -replace '[\d.]+(?=:\d{4,})', $wslIp |
+  Set-Content "C:\Users\johna\.kube\k3s-config.yaml" -Encoding utf8
 ```
 
 ---
 
 ## Frontend
 
-- Vite proxy routes `/api/v1/auth` and `/api/v1/users` → `:8001`, `/api/v1/orders` → `:8002`, `/api/v1/payments` → `:8003`
-- JWT stored in `localStorage`. Axios interceptor attaches `Authorization: Bearer <token>` to every request and redirects to `/login` on 401.
-- Dashboard stats use `GET /orders/stats` and `GET /payments/stats` — not paginated list fetches.
+- **App name**: Nexus (dark SaaS theme — zinc/indigo)
+- Vite proxy: `/api/v1/auth`, `/api/v1/users` → `:8001`; `/api/v1/orders` → `:8002`; `/api/v1/payments` → `:8003`
+- **JWT**: stored in `localStorage`. `src/lib/auth.ts` — `decodeToken()` base64-decodes the JWT payload, `isAdmin()` checks the `admin` claim. Used by `RequireAdmin` route guard and Sidebar conditional rendering.
+- **Token refresh**: axios 401 interceptor in `api.ts` calls `POST /auth/refresh` (HttpOnly cookie is sent automatically). Concurrent 401s are deduplicated via `_refreshPromise`. Refresh 401 → clear token → redirect to `/login`.
+- **Error boundaries**: `src/components/ErrorBoundary.tsx` wraps each route page — shows "Something went wrong" with a "Try again" reset button instead of a blank screen.
+- **Toasts**: `src/contexts/ToastContext` + `api.ts._onApiError` — 429, 5xx, and network errors show toast notifications.
 - shadcn/ui components are hand-written (no CLI) in `frontend/src/components/ui/`.
 
 ---
@@ -233,7 +334,7 @@ kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABAS
 
 ### Python / FastAPI
 
-- All config from environment variables via `pydantic-settings`. Local: copy `.env.example` → `.env`.
+- All config from environment variables via `pydantic-settings`.
 - `async def` throughout — never sync SQLAlchemy or sync HTTP clients.
 - Routes call `AsyncSession` via `Depends(get_db)` directly — no repository layer.
 - Every endpoint returns a Pydantic response model — never raw dicts.
@@ -245,36 +346,42 @@ kubectl exec -n fullstack deploy/postgres -- psql -U postgres -c "CREATE DATABAS
 
 ### Auth (users service only)
 
-- Passwords hashed with `bcrypt` directly (not passlib — passlib 1.7.4 is incompatible with bcrypt 4+).
-- JWT signed with HS256. Secret in `SECRET_KEY` env var.
+- Passwords hashed with `bcrypt` directly — `passlib` is incompatible with bcrypt 4+, never use it.
+- `create_access_token(subject, secret_key, expire_minutes, is_admin=False)` — always pass `is_admin`.
 - Login endpoint accepts `application/x-www-form-urlencoded` (OAuth2PasswordRequestForm).
+- `require_admin` is a FastAPI dependency in `shared/auth.py` — import it from there, do not re-implement.
+
+### Migrations (Alembic)
+
+- All three services have `alembic.ini` + `migrations/versions/` — use Alembic for every schema change, never raw `CREATE TABLE`.
+- Migration files follow the naming pattern `NNNN_<description>.py`.
+- `env.py` swaps `asyncpg` → `postgresql://` (psycopg2) for the sync migration runner.
+- In production, migrations run automatically via the `migrate` init container before the app starts.
 
 ### Inter-service communication
 
-- Services call each other over HTTP using `httpx.AsyncClient`.
-- `services/shared/auth.py` provides a bearer extractor for orders/payments to validate JWTs.
+- `services/shared/auth.py` provides `get_current_user_id` and `require_admin` for orders/payments.
 - Each service owns its own database — no cross-service DB queries.
 
 ### TypeScript / React
 
-- Functional components only.
+- Functional components only; class components only for `ErrorBoundary`.
 - `react-router-dom` v6 for routing.
-- `axios` for all API calls, configured in `frontend/src/lib/api.ts`.
+- All API calls go through the axios instance in `src/lib/api.ts` — never use `fetch` directly.
+- Auth utilities (`isAdmin`, `decodeToken`) live in `src/lib/auth.ts`.
 - File naming: `PascalCase` components, `camelCase` utilities.
 
 ### Testing
 
-- Tests use `ASGITransport` (in-process) — no running server needed.
-- `conftest.py` sets `DATABASE_URL` env var **before** any app imports to point at `*_test` DB.
-- Session-scoped engine fixture creates/drops tables once per test run.
-- `autouse` fixture truncates all tables before each test.
-- `client` fixture overrides `get_db` dependency with test session factory.
+- Unit tests use `ASGITransport` (in-process) — no running server needed.
+- `conftest.py` sets `DATABASE_URL` and `INITIAL_ADMIN_EMAIL` env vars **before** any app imports.
+- `admin_headers` / `user_headers` fixtures generate JWT tokens directly (no DB writes) — count-based assertions remain accurate.
+- RBAC tests are parametrized: `(method, path)` × `(no token → 401, non-admin → 403)`.
+- E2E Playwright tests in `frontend/e2e/` cover login, dashboard, orders, users (RBAC), and payments.
 
 ---
 
 ## CI/CD
-
-CI is GitHub Actions. CD is ArgoCD (GitOps — no `kubectl` in the pipeline after bootstrap).
 
 ### Flow
 
@@ -282,91 +389,59 @@ CI is GitHub Actions. CD is ArgoCD (GitOps — no `kubectl` in the pipeline afte
 Push to main
     │
     ├─ test (matrix: users, orders, payments)
-    │       pytest against ephemeral PostgreSQL service container
+    │       pytest + real PostgreSQL + Redis service containers
     │
-    ├─ build-push (after tests pass)
-    │       podman build + push to ghcr.io/jaosullivan/webapp/<service>:<sha>
+    ├─ test-frontend
+    │       Vitest unit tests
     │
-    └─ update-manifests
-            kustomize edit set image → updates infra/k8s/overlays/production/kustomization.yaml
-            git commit + push [skip ci]
+    ├─ test-e2e (on push only)
+    │       postgres + redis services, all three backends started via uvicorn
+    │       seed.py populates data, Playwright runs against http://localhost:3000
+    │
+    ├─ build-push (after test + test-frontend)
+    │       docker build + push to ghcr.io/jaosullivan/webapp/<service>:<sha>
+    │
+    ├─ scan (after build-push, parallel across 4 images)
+    │       Trivy — fails on any CRITICAL CVE
+    │
+    └─ update-manifests (after build-push + scan)
+            kustomize edit set image → production/kustomization.yaml
+            git commit [skip ci]
                 │
-                └─ ArgoCD detects the change → syncs cluster automatically
+                └─ ArgoCD auto-syncs cluster
 ```
 
-### Files
+### Dependabot
 
-| File | Purpose |
-|---|---|
-| `.github/workflows/ci.yml` | Active: test → build → push → update Kustomize overlay |
-| `.github/workflows/bootstrap-argocd.yml` | Active: one-time `workflow_dispatch` to install ArgoCD on a cluster |
-| `ops/ci/ci.yml` | Redirect stub (navigation only — edit `.github/workflows/ci.yml`) |
-| `ops/cd/bootstrap-argocd.yml` | Redirect stub (navigation only) |
-| `infra/argocd/project.yaml` | ArgoCD AppProject — scopes source repo and allowed namespaces |
-| `infra/argocd/apps/fullstack-app.yaml` | ArgoCD Application — watches `infra/k8s/overlays/production`, auto-syncs |
-| `infra/k8s/overlays/production/kustomization.yaml` | Kustomize overlay; CI writes image tags here |
+`.github/dependabot.yml` — weekly PRs for:
+- GitHub Actions versions
+- pip deps for each of the three services
+- npm deps for frontend (React ecosystem and Tailwind grouped)
 
 ### Image registry
 
 `ghcr.io/jaosullivan/webapp/<service>:<sha>` and `:latest`
-
-### ArgoCD sync policy
-
-- `automated.prune: true` — removes K8s resources deleted from Git
-- `automated.selfHeal: true` — reverts out-of-band manual cluster changes
-- `CreateNamespace=true` — ArgoCD creates the `fullstack` namespace if absent
 
 ### Secrets required
 
 | Secret | Where | Value |
 |---|---|---|
 | `GITHUB_TOKEN` | Auto-provided | Push packages to ghcr.io, commit manifest changes |
-| `KUBECONFIG` | GitHub Actions environment `production` | Only needed for the one-time bootstrap |
-
-### Local cluster (k3s in WSL2 Ubuntu)
-
-A local Kubernetes cluster runs k3s inside the Ubuntu WSL2 distro.
-
-**Kubeconfig**: `C:\Users\johna\.kube\k3s-config.yaml`  
-**kubectl**: `C:\Program Files\Docker\Docker\resources\bin\kubectl.exe`
-
-The server IP in the kubeconfig (`172.20.183.125`) is the Ubuntu WSL2 NIC IP which can change on WSL restart. To refresh it:
-```powershell
-$wslIp = (wsl -d Ubuntu -u root -- hostname -I) -split '\s+' | Select-Object -First 1
-$cfg = Get-Content "C:\Users\johna\.kube\k3s-config.yaml" -Raw
-# replace old IP with new one, then Set-Content
-```
-
-**ArgoCD UI**: `https://localhost:8080` (after port-forward)  
-```powershell
-$env:KUBECONFIG = "C:\Users\johna\.kube\k3s-config.yaml"
-& "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe" port-forward svc/argocd-server -n argocd 8080:443
-# user: admin  password: get with:
-& "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe" -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_)) }
-```
-
-**In-cluster secrets** (not in Git — apply imperatively after cluster restart):
-```powershell
-$kubectl = "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe"
-& $kubectl create secret generic postgres-secrets -n fullstack --from-literal=password=postgres --dry-run=client -o yaml | & $kubectl apply -f -
-@("users","orders","payments") | ForEach-Object {
-  $url = "postgresql+asyncpg://postgres:postgres@postgres.fullstack.svc.cluster.local:5432/$_"
-  & $kubectl create secret generic "${_}-secrets" -n fullstack --from-literal=database-url=$url --dry-run=client -o yaml | & $kubectl apply -f -
-}
-```
-
-**ArgoCD kustomize config** (already patched — survives restarts):
-- `argocd-cm` ConfigMap has `kustomize.buildOptions: --load-restrictor LoadRestrictionsNone`
+| `KUBECONFIG` | GitHub Actions environment `production` | One-time bootstrap only |
 
 ---
 
 ## Do Not
 
 - Do not hardcode secrets, passwords, or API keys in source code
-- Do not use `passlib` — use `bcrypt` directly (passlib incompatible with bcrypt 5.x)
+- Do not use `passlib` — use `bcrypt` directly (incompatible with bcrypt 5.x)
 - Do not use synchronous SQLAlchemy (`create_engine`) — always `create_async_engine`
 - Do not return raw `dict` from endpoints — always use a Pydantic response model
 - Do not query another service's database directly — use HTTP calls
 - Do not use sync HTTP clients (`requests`) — use `httpx.AsyncClient`
 - Do not commit `.env` files or K8s Secret manifests with real values
 - Do not register `/{id}` routes before named routes like `/stats` or `/user/{uid}`
+- Do not add new schema changes without a corresponding Alembic migration
+- Do not bypass `require_admin` — re-implement it — import it from `shared/auth.py`
+- Do not push images that fail Trivy CRITICAL scan — the `scan` CI job gates `update-manifests`
+- Do not use `fetch` directly in the frontend — route all API calls through `src/lib/api.ts`

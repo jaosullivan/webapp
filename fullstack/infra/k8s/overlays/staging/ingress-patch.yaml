@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fullstack-ingress
+  namespace: fullstack-staging
+spec:
+  rules:
+    - host: staging.fullstack.local
+      http:
+        paths:
+          - path: /api/v1/(auth|users)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: users
+                port:
+                  number: 8000
+          - path: /api/v1/(orders)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: orders
+                port:
+                  number: 8000
+          - path: /api/v1/(payments)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: payments
+                port:
+                  number: 8000
+          - path: /(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

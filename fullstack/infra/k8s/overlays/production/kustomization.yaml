@@ -10,6 +10,11 @@ resources:
 - ../../services/orders.yaml
 - ../../services/payments.yaml
 - ../../services/frontend.yaml
+- ../../services/redis.yaml
+- ../../services/hpa.yaml
+- ../../services/pdb.yaml
+- ../../services/network-policies.yaml
+- ../../services/postgres-backup.yaml
 
 # Image tags are updated here automatically by the CI pipeline (update-manifests job).
 # Do not edit these manually — they will be overwritten on the next push to main.

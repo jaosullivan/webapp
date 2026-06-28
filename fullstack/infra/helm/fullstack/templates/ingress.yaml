@@ -1,0 +1,45 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fullstack-ingress
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "fullstack.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /api/v1/(auth|users)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: users
+                port:
+                  number: {{ .Values.services.users.port }}
+          - path: /api/v1/(orders)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: orders
+                port:
+                  number: {{ .Values.services.orders.port }}
+          - path: /api/v1/(payments)(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: payments
+                port:
+                  number: {{ .Values.services.payments.port }}
+          - path: /(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: {{ .Values.services.frontend.port }}
+{{- end }}

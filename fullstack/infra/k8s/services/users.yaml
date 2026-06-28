@@ -13,17 +13,65 @@ spec:
       labels:
         app: users
     spec:
-      containers:
-        - name: users
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      initContainers:
+        - name: migrate
           image: fullstack/users:latest
-          ports:
-            - containerPort: 8000
+          command: ["alembic", "-c", "/app/alembic.ini", "upgrade", "head"]
           env:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: users-secrets
                   key: database-url
+            - name: PYTHONPATH
+              value: "/app"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: users
+          image: fullstack/users:latest
+          ports:
+            - containerPort: 8000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: users-secrets
+                  key: database-url
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shared-secrets
+                  key: secret-key
+            - name: REDIS_URL
+              value: "redis://redis.fullstack.svc.cluster.local:6379"
+            - name: CORS_ORIGINS
+              value: "https://fullstack.local"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.fullstack.svc.cluster.local:4317"
+            - name: COOKIE_SECURE
+              value: "true"
+            - name: INITIAL_ADMIN_EMAIL
+              value: "admin@example.com"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: "100m"
@@ -37,6 +85,16 @@ spec:
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

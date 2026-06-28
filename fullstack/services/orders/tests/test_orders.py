@@ -6,8 +6,10 @@ USER_ID = "11111111-1111-1111-1111-111111111111"
 
 async def test_health(client: AsyncClient):
     r = await client.get("/health")
-    assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    assert r.status_code in (200, 503)
+    data = r.json()
+    assert "status" in data
+    assert data["db"] == "ok"
 
 
 # ---------------------------------------------------------------------------

@@ -6,8 +6,10 @@ ORDER_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 
 async def test_health(client: AsyncClient):
     r = await client.get("/health")
-    assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    assert r.status_code in (200, 503)
+    data = r.json()
+    assert "status" in data
+    assert data["db"] == "ok"
 
 
 # ---------------------------------------------------------------------------

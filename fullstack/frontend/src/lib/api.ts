@@ -1,6 +1,17 @@
 import axios from "axios";
 
-const api = axios.create({ baseURL: "/api/v1" });
+const api = axios.create({
+  baseURL: "/api/v1",
+  withCredentials: true, // required to send the HttpOnly refresh_token cookie
+});
+
+let _onApiError: ((msg: string) => void) | null = null;
+export const setApiErrorHandler = (fn: (msg: string) => void) => {
+  _onApiError = fn;
+};
+
+// Single in-flight refresh promise — all concurrent 401s wait on the same call.
+let _refreshPromise: Promise<string> | null = null;
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
@@ -10,10 +21,48 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (r) => r,
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem("token");
-      window.location.href = "/login";
+  async (err) => {
+    const status: number | undefined = err.response?.status;
+    const isRefreshUrl = err.config?.url === "/auth/refresh";
+
+    if (status === 401) {
+      if (isRefreshUrl) {
+        // Refresh itself got 401 — let the _refreshPromise .catch handle cleanup.
+        return Promise.reject(err);
+      }
+
+      if (!_refreshPromise) {
+        _refreshPromise = api
+          .post<{ access_token: string }>("/auth/refresh")
+          .then((r) => {
+            const token = r.data.access_token;
+            localStorage.setItem("token", token);
+            return token;
+          })
+          .catch(() => {
+            localStorage.removeItem("token");
+            window.location.href = "/login";
+            return Promise.reject(new Error("Session expired"));
+          })
+          .finally(() => {
+            _refreshPromise = null;
+          });
+      }
+
+      try {
+        const newToken = await _refreshPromise;
+        err.config.headers = err.config.headers ?? {};
+        err.config.headers.Authorization = `Bearer ${newToken}`;
+        return api(err.config);
+      } catch {
+        return Promise.reject(err);
+      }
+    } else if (status === 429) {
+      _onApiError?.("Too many requests — please wait a moment.");
+    } else if (status && status >= 500) {
+      _onApiError?.("Server error — please try again.");
+    } else if (!err.response) {
+      _onApiError?.("Network error — check your connection.");
     }
     return Promise.reject(err);
   }
@@ -26,6 +75,7 @@ export const auth = {
     form.append("password", password);
     return api.post<{ access_token: string }>("/auth/token", form);
   },
+  logout: () => api.post("/auth/logout"),
 };
 
 export const users = {
@@ -53,6 +103,7 @@ export interface User {
   id: string;
   email: string;
   is_active: boolean;
+  is_admin: boolean;
   created_at: string;
 }
 

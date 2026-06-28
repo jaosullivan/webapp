@@ -1,7 +1,9 @@
 import os
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/users_test")
+os.environ.setdefault("INITIAL_ADMIN_EMAIL", "admin@test.com")
 
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
@@ -11,8 +13,10 @@ import app.models.user  # noqa: F401 — must import before app.main to register
 from app.main import app as fastapi_app
 from app.db.session import get_db
 from app.db.base import Base
+from app.core.security import create_access_token
 
 _TEST_DB_URL = os.environ["DATABASE_URL"]
+_SECRET_KEY = os.environ.get("SECRET_KEY", "changeme-in-production")
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -45,3 +49,27 @@ async def client(engine):
     async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as c:
         yield c
     fastapi_app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def admin_headers() -> dict:
+    """Valid JWT with admin=True — does not create any DB row."""
+    token = create_access_token(
+        subject="test-admin-id",
+        secret_key=_SECRET_KEY,
+        expire_minutes=60,
+        is_admin=True,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def user_headers() -> dict:
+    """Valid JWT with admin=False — does not create any DB row."""
+    token = create_access_token(
+        subject="test-user-id",
+        secret_key=_SECRET_KEY,
+        expire_minutes=60,
+        is_admin=False,
+    )
+    return {"Authorization": f"Bearer {token}"}

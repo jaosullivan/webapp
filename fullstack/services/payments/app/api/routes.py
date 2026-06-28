@@ -6,8 +6,9 @@ from sqlalchemy import select, func
 from app.db.session import get_db
 from app.models.payment import Payment, PaymentStatus
 from app.schemas.payment import PaymentCreate, PaymentResponse, PaymentListResponse, PaymentStatusUpdate, PaymentStats
+from shared.auth import get_current_user_id
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_id)])
 
 
 @router.post("/payments", response_model=PaymentResponse, status_code=201)

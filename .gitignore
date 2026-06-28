@@ -20,5 +20,9 @@ fullstack/logs/
 # Frontend build output
 fullstack/frontend/dist/
 
+# Playwright
+fullstack/frontend/playwright-report/
+fullstack/frontend/test-results/
+
 # Editor
 .vscode/settings.json

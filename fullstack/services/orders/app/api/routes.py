@@ -5,8 +5,9 @@ from sqlalchemy import select, func
 from app.db.session import get_db
 from app.models.order import Order, OrderStatus
 from app.schemas.order import OrderCreate, OrderResponse, OrderListResponse, OrderStatusUpdate, OrderStats
+from shared.auth import get_current_user_id
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_id)])
 
 
 @router.post("/orders", response_model=OrderResponse, status_code=201)

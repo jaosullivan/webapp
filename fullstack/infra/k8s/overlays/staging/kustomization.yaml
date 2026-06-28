@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: fullstack-staging
+
+resources:
+- ./namespace.yaml
+- ../../services/users.yaml
+- ../../services/orders.yaml
+- ../../services/payments.yaml
+- ../../services/frontend.yaml
+- ./ingress-patch.yaml
+
+# Staging always uses :latest — pinned tags are for production only.
+# CI deploys to staging on every push to develop; promotion to production is manual.
+images:
+- name: fullstack/users
+  newName: ghcr.io/jaosullivan/webapp/users
+  newTag: latest
+- name: fullstack/orders
+  newName: ghcr.io/jaosullivan/webapp/orders
+  newTag: latest
+- name: fullstack/payments
+  newName: ghcr.io/jaosullivan/webapp/payments
+  newTag: latest
+- name: fullstack/frontend
+  newName: ghcr.io/jaosullivan/webapp/frontend
+  newTag: latest

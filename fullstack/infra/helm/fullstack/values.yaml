@@ -1,0 +1,67 @@
+global:
+  imageRegistry: ghcr.io/jaosullivan/webapp
+  imageTag: latest
+  imagePullPolicy: IfNotPresent
+  namespace: fullstack
+
+ingress:
+  enabled: true
+  className: nginx
+  host: fullstack.local
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /api/v1/$2
+
+services:
+  users:
+    replicas: 2
+    image: users
+    port: 8000
+    resources:
+      requests: { cpu: "100m", memory: "128Mi" }
+      limits:   { cpu: "500m", memory: "512Mi" }
+    env:
+      DATABASE_URL:
+        secretKeyRef: { name: users-secrets, key: database-url }
+      SECRET_KEY:
+        secretKeyRef: { name: shared-secrets, key: secret-key }
+      REDIS_URL:
+        value: "redis://redis.fullstack.svc.cluster.local:6379"
+
+  orders:
+    replicas: 2
+    image: orders
+    port: 8000
+    resources:
+      requests: { cpu: "100m", memory: "128Mi" }
+      limits:   { cpu: "500m", memory: "512Mi" }
+    env:
+      DATABASE_URL:
+        secretKeyRef: { name: orders-secrets, key: database-url }
+      SECRET_KEY:
+        secretKeyRef: { name: shared-secrets, key: secret-key }
+      REDIS_URL:
+        value: "redis://redis.fullstack.svc.cluster.local:6379"
+
+  payments:
+    replicas: 2
+    image: payments
+    port: 8000
+    resources:
+      requests: { cpu: "100m", memory: "128Mi" }
+      limits:   { cpu: "500m", memory: "512Mi" }
+    env:
+      DATABASE_URL:
+        secretKeyRef: { name: payments-secrets, key: database-url }
+      SECRET_KEY:
+        secretKeyRef: { name: shared-secrets, key: secret-key }
+      REDIS_URL:
+        value: "redis://redis.fullstack.svc.cluster.local:6379"
+
+  frontend:
+    replicas: 2
+    image: frontend
+    port: 80
+    resources:
+      requests: { cpu: "50m",  memory: "64Mi" }
+      limits:   { cpu: "200m", memory: "128Mi" }

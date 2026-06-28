@@ -1,0 +1,613 @@
+---
+# ── Grafana datasource & dashboard provider provisioning ─────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-provisioning
+  namespace: fullstack
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        url: http://prometheus.fullstack.svc.cluster.local:9090
+        access: proxy
+        isDefault: true
+        jsonData:
+          timeInterval: "15s"
+
+      - name: Loki
+        type: loki
+        uid: loki
+        url: http://loki.fullstack.svc.cluster.local:3100
+        access: proxy
+        jsonData:
+          maxLines: 1000
+
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        url: http://tempo.fullstack.svc.cluster.local:3200
+        access: proxy
+        jsonData:
+          httpMethod: GET
+          serviceMap:
+            datasourceUid: prometheus
+          nodeGraph:
+            enabled: true
+          tracesToLogsV2:
+            datasourceUid: loki
+            spanStartTimeShift: '-5m'
+            spanEndTimeShift: '5m'
+
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        folder: Fullstack
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards
+
+---
+# ── Dashboard JSON ────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard
+  namespace: fullstack
+data:
+  fullstack.json: |
+    {
+      "annotations": { "list": [] },
+      "description": "HTTP request rates, latency percentiles, and error rates for all three microservices.",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+          "id": 1,
+          "title": "Overview",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "fixedColor": "blue", "mode": "fixed" },
+              "unit": "reqps",
+              "noValue": "0"
+            }
+          },
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+          "id": 2,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "sum(rate(http_request_duration_seconds_count{job=~\"$service\"}[2m]))",
+              "legendFormat": "RPS",
+              "refId": "A"
+            }
+          ],
+          "title": "Requests / sec",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "yellow", "value": 95 },
+                  { "color": "green", "value": 99 }
+                ]
+              },
+              "unit": "percent",
+              "noValue": "—",
+              "decimals": 1
+            }
+          },
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+          "id": 3,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "reduceOptions": { "calcs": ["lastNotNull"] }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "100 * sum(rate(http_request_duration_highr_seconds_count{job=~\"$service\", status=~\"2..\"}[2m])) / sum(rate(http_request_duration_highr_seconds_count{job=~\"$service\"}[2m]))",
+              "legendFormat": "Success %",
+              "refId": "A"
+            }
+          ],
+          "title": "Success Rate",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 200 },
+                  { "color": "red", "value": 1000 }
+                ]
+              },
+              "unit": "ms",
+              "noValue": "—",
+              "decimals": 1
+            }
+          },
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+          "id": 4,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "reduceOptions": { "calcs": ["lastNotNull"] }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=~\"$service\"}[2m])) by (le)) * 1000",
+              "legendFormat": "P95 ms",
+              "refId": "A"
+            }
+          ],
+          "title": "P95 Latency",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "red", "value": 5 }
+                ]
+              },
+              "unit": "percent",
+              "noValue": "0",
+              "decimals": 2
+            }
+          },
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+          "id": 5,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "reduceOptions": { "calcs": ["lastNotNull"] }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "100 * sum(rate(http_request_duration_highr_seconds_count{job=~\"$service\", status=~\"5..\"}[2m])) / sum(rate(http_request_duration_highr_seconds_count{job=~\"$service\"}[2m]))",
+              "legendFormat": "Error %",
+              "refId": "A"
+            }
+          ],
+          "title": "Error Rate (5xx)",
+          "type": "stat"
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+          "id": 10,
+          "title": "Traffic",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": { "lineWidth": 2, "fillOpacity": 8 }
+            }
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "id": 11,
+          "options": {
+            "tooltip": { "mode": "multi", "sort": "desc" },
+            "legend": { "displayMode": "list", "placement": "bottom" }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "sum(rate(http_request_duration_seconds_count{job=~\"$service\"}[2m])) by (job)",
+              "legendFormat": "{{job}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Request Rate by Service",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": { "lineWidth": 2, "fillOpacity": 8 }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byFrameRefID", "options": "A" },
+                "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+              },
+              {
+                "matcher": { "id": "byFrameRefID", "options": "B" },
+                "properties": [{ "id": "color", "value": { "fixedColor": "#EAB308", "mode": "fixed" } }]
+              },
+              {
+                "matcher": { "id": "byFrameRefID", "options": "C" },
+                "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+              }
+            ]
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "id": 12,
+          "options": {
+            "tooltip": { "mode": "multi", "sort": "desc" },
+            "legend": { "displayMode": "list", "placement": "bottom" }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "sum(rate(http_request_duration_highr_seconds_count{job=~\"$service\", status=~\"2..\"}[2m])) by (job)",
+              "legendFormat": "2xx {{job}}",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "sum(rate(http_request_duration_highr_seconds_count{job=~\"$service\", status=~\"4..\"}[2m])) by (job)",
+              "legendFormat": "4xx {{job}}",
+              "refId": "B"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "sum(rate(http_request_duration_highr_seconds_count{job=~\"$service\", status=~\"5..\"}[2m])) by (job)",
+              "legendFormat": "5xx {{job}}",
+              "refId": "C"
+            }
+          ],
+          "title": "Request Rate by Status Class",
+          "type": "timeseries"
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+          "id": 20,
+          "title": "Latency",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "custom": { "lineWidth": 2, "fillOpacity": 5 }
+            }
+          },
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 15 },
+          "id": 21,
+          "options": {
+            "tooltip": { "mode": "multi", "sort": "asc" },
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": ["mean", "max", "lastNotNull"]
+            }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=~\"$service\"}[2m])) by (le, job)) * 1000",
+              "legendFormat": "P50 · {{job}}",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=~\"$service\"}[2m])) by (le, job)) * 1000",
+              "legendFormat": "P95 · {{job}}",
+              "refId": "B"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=~\"$service\"}[2m])) by (le, job)) * 1000",
+              "legendFormat": "P99 · {{job}}",
+              "refId": "C"
+            }
+          ],
+          "title": "Latency Percentiles by Service (ms)",
+          "type": "timeseries"
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+          "id": 30,
+          "title": "Errors",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": { "fixedColor": "red", "mode": "fixed" },
+              "custom": { "lineWidth": 2, "fillOpacity": 20 }
+            }
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+          "id": 31,
+          "options": {
+            "tooltip": { "mode": "multi" },
+            "legend": { "displayMode": "list", "placement": "bottom" }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "sum(rate(http_request_duration_highr_seconds_count{job=~\"$service\", status=~\"5..\"}[2m])) by (job)",
+              "legendFormat": "{{job}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Server Errors (5xx) / sec by Service",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": { "fixedColor": "#EAB308", "mode": "fixed" },
+              "custom": { "lineWidth": 2, "fillOpacity": 20 }
+            }
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+          "id": 32,
+          "options": {
+            "tooltip": { "mode": "multi" },
+            "legend": { "displayMode": "list", "placement": "bottom" }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "sum(rate(http_request_duration_highr_seconds_count{job=~\"$service\", status=~\"4..\"}[2m])) by (job)",
+              "legendFormat": "{{job}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Client Errors (4xx) / sec by Service",
+          "type": "timeseries"
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
+          "id": 40,
+          "title": "Top Endpoints",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": { "unit": "reqps", "decimals": 3 },
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "job" },    "properties": [{ "id": "displayName", "value": "Service" }] },
+              { "matcher": { "id": "byName", "options": "method" }, "properties": [{ "id": "displayName", "value": "Method" }] },
+              { "matcher": { "id": "byName", "options": "handler" },"properties": [{ "id": "displayName", "value": "Handler" }] },
+              { "matcher": { "id": "byName", "options": "Value" },  "properties": [{ "id": "displayName", "value": "RPS" }] }
+            ]
+          },
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 34 },
+          "id": 41,
+          "options": {
+            "sortBy": [{ "displayName": "RPS", "desc": true }],
+            "footer": { "show": false }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "topk(10, sum(rate(http_request_duration_seconds_count{job=~\"$service\"}[2m])) by (job, handler, method))",
+              "instant": true,
+              "legendFormat": "{{method}} {{handler}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Top Endpoints by Request Rate",
+          "transformations": [
+            { "id": "labelsToFields", "options": { "valueLabel": "handler" } },
+            { "id": "merge", "options": {} }
+          ],
+          "type": "table"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": { "unit": "ms", "decimals": 1 },
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "job" },    "properties": [{ "id": "displayName", "value": "Service" }] },
+              { "matcher": { "id": "byName", "options": "handler" },"properties": [{ "id": "displayName", "value": "Handler" }] },
+              { "matcher": { "id": "byName", "options": "Value" },  "properties": [{ "id": "displayName", "value": "P95 ms" }] }
+            ]
+          },
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 34 },
+          "id": 42,
+          "options": {
+            "sortBy": [{ "displayName": "P95 ms", "desc": true }],
+            "footer": { "show": false }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "topk(10, histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=~\"$service\"}[2m])) by (le, job, handler)) * 1000)",
+              "instant": true,
+              "legendFormat": "{{job}} {{handler}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Top Endpoints by P95 Latency",
+          "transformations": [
+            { "id": "labelsToFields", "options": { "valueLabel": "handler" } },
+            { "id": "merge", "options": {} }
+          ],
+          "type": "table"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 38,
+      "tags": ["fullstack", "microservices", "fastapi"],
+      "templating": {
+        "list": [
+          {
+            "current": { "selected": true, "text": "All", "value": "$__all" },
+            "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "definition": "label_values(http_request_duration_seconds_count, job)",
+            "hide": 0,
+            "includeAll": true,
+            "multi": true,
+            "name": "service",
+            "options": [],
+            "query": {
+              "query": "label_values(http_request_duration_seconds_count, job)",
+              "refId": "StandardVariableQuery"
+            },
+            "refresh": 2,
+            "type": "query",
+            "label": "Service",
+            "allValue": ".*"
+          }
+        ]
+      },
+      "time": { "from": "now-1h", "to": "now" },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Fullstack — Service Overview",
+      "uid": "fullstack-overview",
+      "version": 1
+    }
+
+---
+# ── Grafana admin credentials ─────────────────────────────────────────────────
+# Rotate by replacing the base64-encoded values and re-applying.
+# Generate: echo -n 'new-password' | base64
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin-secret
+  namespace: fullstack
+type: Opaque
+data:
+  admin-user: YWRtaW4=      # admin
+  admin-password: YWRtaW4=  # admin  (change before exposing publicly)
+
+---
+# ── Grafana deployment ────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: fullstack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-secret
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-secret
+                  key: admin-password
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            - name: GF_SERVER_ROOT_URL
+              value: "http://localhost:3001"
+          volumeMounts:
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/datasources/prometheus.yaml
+              subPath: datasources.yaml
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/dashboards/default.yaml
+              subPath: dashboards.yaml
+            - name: dashboard
+              mountPath: /var/lib/grafana/dashboards/fullstack.json
+              subPath: fullstack.json
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: provisioning
+          configMap:
+            name: grafana-provisioning
+        - name: dashboard
+          configMap:
+            name: grafana-dashboard
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: fullstack
+spec:
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000

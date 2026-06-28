@@ -1,0 +1,142 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: fullstack
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+                - alertmanager.fullstack.svc.cluster.local:9093
+
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+
+    scrape_configs:
+      - job_name: users
+        static_configs:
+          - targets: ["users.fullstack.svc.cluster.local:8000"]
+        metrics_path: /metrics
+
+      - job_name: orders
+        static_configs:
+          - targets: ["orders.fullstack.svc.cluster.local:8000"]
+        metrics_path: /metrics
+
+      - job_name: payments
+        static_configs:
+          - targets: ["payments.fullstack.svc.cluster.local:8000"]
+        metrics_path: /metrics
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: fullstack
+data:
+  fullstack.rules.yml: |
+    groups:
+      - name: fullstack.alerts
+        interval: 30s
+        rules:
+          # Alert when any scrape target has been down for 2 minutes
+          - alert: ScrapeTargetDown
+            expr: up == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Scrape target {{ $labels.job }} is down"
+              description: "Prometheus cannot reach {{ $labels.job }} at {{ $labels.instance }}"
+
+          # Alert when 5xx error rate exceeds 5% over a 5-minute window
+          - alert: HighErrorRate
+            expr: |
+              (
+                sum(rate(http_request_duration_highr_seconds_count{status=~"5.."}[5m])) by (job)
+                /
+                sum(rate(http_request_duration_highr_seconds_count[5m])) by (job)
+              ) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High 5xx error rate on {{ $labels.job }}"
+              description: "{{ $labels.job }} has >5% server errors over the last 5 minutes (current: {{ $value | humanizePercentage }})"
+
+          # Alert when P95 latency exceeds 1 second over a 5-minute window
+          - alert: HighP95Latency
+            expr: |
+              histogram_quantile(0.95,
+                sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job)
+              ) > 1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High P95 latency on {{ $labels.job }}"
+              description: "{{ $labels.job }} P95 latency is {{ $value | humanizeDuration }} (threshold: 1s)"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: fullstack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.0
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.retention.time=7d"
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: rules
+              mountPath: /etc/prometheus/rules
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: rules
+          configMap:
+            name: prometheus-rules
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: fullstack
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090

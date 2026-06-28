@@ -1,0 +1,6 @@
+apiVersion: v2
+name: fullstack
+description: Kubernetes-native fullstack app — users, orders, payments microservices + React frontend
+type: application
+version: 0.1.0
+appVersion: "latest"
