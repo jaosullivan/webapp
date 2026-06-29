@@ -81,7 +81,7 @@ fullstack/
 |---|---|---|---|
 | GET | `/health` | — | Health check |
 | POST | `/api/v1/users` | — | Register user (`{email, password}`) |
-| POST | `/api/v1/auth/token` | — | Login — returns access token + sets refresh cookie |
+| POST | `/api/v1/auth/token` | — | Login — returns access token + sets refresh cookie (rate limited 50/min) |
 | POST | `/api/v1/auth/refresh` | refresh cookie | Rotate tokens (rate limited 20/min) |
 | POST | `/api/v1/auth/logout` | Bearer | Blocklist both tokens, clear cookie |
 | GET | `/api/v1/users` | **admin** | List users (`?skip=&limit=`) |
@@ -158,7 +158,7 @@ services/<name>/
 
 **Admin bootstrap**: set `INITIAL_ADMIN_EMAIL` env var on the users service. The first `POST /api/v1/users` call with that email gets `is_admin=True` automatically. In production k8s this is `admin@example.com` (see `users.yaml`). For local dev, `start-dev.ps1` sets this env var on the users process.
 
-**Frontend auth flow**: `api.ts` uses a single `_refreshPromise` to deduplicate concurrent 401 → refresh calls. If the refresh endpoint itself returns 401, the interceptor clears the token and redirects to `/login`. `src/lib/auth.ts` provides `isAdmin()` which base64-decodes the JWT payload from localStorage — used by `RequireAdmin` route guard and the conditional Users link in the Sidebar.
+**Frontend auth flow**: `api.ts` uses a single `_refreshPromise` to deduplicate concurrent 401 → refresh calls. If the refresh endpoint itself returns 401, the interceptor clears the token and redirects to `/login`. The `/auth/token` (login) endpoint is **exempt** from this refresh flow — a 401 from login means wrong credentials, not an expired token; the interceptor passes it straight to the caller so the LoginPage can render the error message. `src/lib/auth.ts` provides `isAdmin()` which base64-decodes the JWT payload from localStorage — used by `RequireAdmin` route guard and the conditional Users link in the Sidebar.
 
 ---
 
@@ -341,7 +341,7 @@ $wslIp = (wsl -d Ubuntu -u root -- hostname -I) -split '\s+' | Select-Object -Fi
 - UUID string PKs on all models: `default=lambda: str(uuid.uuid4())`.
 - Response schemas use `model_config = {"from_attributes": True}`.
 - Raise `HTTPException` for all error responses.
-- Every service exposes `GET /health → {"status": "ok"}`.
+- Every service exposes `GET /health → {"status": "ok"}`. The health handler creates a **fresh `NullPool` engine** per call (`create_async_engine(url, poolclass=NullPool)`) rather than reusing the module-level pool. `QueuePool` binds its internal `asyncio.Queue` to the first event loop that uses it; disposing the pool does not reset the queue, causing "attached to a different loop" errors across test functions.
 - Stats/aggregate routes registered **before** `/{id}` routes to avoid FastAPI matching `stats` as an ID.
 
 ### Auth (users service only)
@@ -377,7 +377,12 @@ $wslIp = (wsl -d Ubuntu -u root -- hostname -I) -split '\s+' | Select-Object -Fi
 - `conftest.py` sets `DATABASE_URL` and `INITIAL_ADMIN_EMAIL` env vars **before** any app imports.
 - `admin_headers` / `user_headers` fixtures generate JWT tokens directly (no DB writes) — count-based assertions remain accurate.
 - RBAC tests are parametrized: `(method, path)` × `(no token → 401, non-admin → 403)`.
+- `pytest-asyncio` uses `asyncio_default_test_loop_scope = "function"` — each test gets its own event loop. The module-level `QueuePool` engine binds its queue to the first loop; health check tests must use a fresh `NullPool` engine per call to avoid "attached to a different loop" errors.
+- Do not add `structlog.stdlib.add_logger_name` to shared processors — it calls `logger.name` which only exists on stdlib `logging.Logger`, not `PrintLogger` from `PrintLoggerFactory()`.
 - E2E Playwright tests in `frontend/e2e/` cover login, dashboard, orders, users (RBAC), and payments.
+- Vitest `include: ["src/test/**/*.{test,spec}.{ts,tsx}"]` is required in `vite.config.ts` — without it the Vitest glob also picks up `e2e/*.spec.ts` Playwright files, which fail because `test.describe()` isn't in scope.
+- E2E login helpers must use a content-based navigation check — `page.getByRole("heading", { name: "Overview" }).waitFor({ timeout: 8000 })` — not `page.waitForURL("/")`. React Router SPA navigation can be missed by the URL poller.
+- The `/auth/token` login endpoint is rate-limited at **50/minute** per IP. The full E2E suite makes ~22 login calls; this limit covers the suite with headroom for retries.
 
 ---
 
@@ -402,7 +407,8 @@ Push to main
     │       docker build + push to ghcr.io/jaosullivan/webapp/<service>:<sha>
     │
     ├─ scan (after build-push, parallel across 4 images)
-    │       Trivy — fails on any CRITICAL CVE
+    │       Trivy CLI (direct install) — fails on CRITICAL CVEs that have a fix available
+    │       (`--ignore-unfixed` skips CVEs with no fixed version in the base OS package)
     │
     └─ update-manifests (after build-push + scan)
             kustomize edit set image → production/kustomization.yaml
@@ -445,3 +451,6 @@ Push to main
 - Do not bypass `require_admin` — re-implement it — import it from `shared/auth.py`
 - Do not push images that fail Trivy CRITICAL scan — the `scan` CI job gates `update-manifests`
 - Do not use `fetch` directly in the frontend — route all API calls through `src/lib/api.ts`
+- Do not add `structlog.stdlib.add_logger_name` to shared processors — `PrintLogger` has no `.name` attribute; use `add_log_level` and `TimeStamper` only
+- Do not use `page.waitForURL("/")` after login in E2E tests — use `page.getByRole("heading", { name: "Overview" }).waitFor()` instead
+- Do not reuse the module-level SQLAlchemy engine in health check handlers — create a fresh `NullPool` engine per call and dispose it in a `finally` block
