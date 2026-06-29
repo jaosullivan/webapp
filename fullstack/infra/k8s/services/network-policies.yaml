@@ -12,6 +12,31 @@ spec:
     - Ingress
 
 ---
+# Postgres: accept connections from the three backend services and the backup CronJob.
+# The default-deny-ingress policy blocks all ingress unless explicitly allowed here;
+# without this rule the Alembic migrate init containers cannot reach postgres:5432.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-postgres
+  namespace: fullstack
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [users, orders, payments, postgres-backup]
+      ports:
+        - port: 5432
+
+---
 # Frontend: accept traffic only from the NGINX ingress controller
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
