@@ -33,13 +33,13 @@ images:
   newTag: latest
 - name: ghcr.io/jaosullivan/webapp/frontend
   newName: ghcr.io/jaosullivan/webapp/frontend
-  newTag: e4ab7819eef225cd357d9f231afccfeb47bd4de7
+  newTag: 6a542e4937f2e0326efde2afa912442390f62f79
 - name: ghcr.io/jaosullivan/webapp/orders
   newName: ghcr.io/jaosullivan/webapp/orders
-  newTag: e4ab7819eef225cd357d9f231afccfeb47bd4de7
+  newTag: 6a542e4937f2e0326efde2afa912442390f62f79
 - name: ghcr.io/jaosullivan/webapp/payments
   newName: ghcr.io/jaosullivan/webapp/payments
-  newTag: e4ab7819eef225cd357d9f231afccfeb47bd4de7
+  newTag: 6a542e4937f2e0326efde2afa912442390f62f79
 - name: ghcr.io/jaosullivan/webapp/users
   newName: ghcr.io/jaosullivan/webapp/users
-  newTag: e4ab7819eef225cd357d9f231afccfeb47bd4de7
+  newTag: 6a542e4937f2e0326efde2afa912442390f62f79
