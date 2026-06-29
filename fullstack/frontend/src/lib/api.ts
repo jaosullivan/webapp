@@ -24,9 +24,10 @@ api.interceptors.response.use(
   async (err) => {
     const status: number | undefined = err.response?.status;
     const isRefreshUrl = err.config?.url === "/auth/refresh";
+    const isLoginUrl = err.config?.url === "/auth/token";
 
     if (status === 401) {
-      if (isRefreshUrl) {
+      if (isRefreshUrl || isLoginUrl) {
         // Refresh itself got 401 — let the _refreshPromise .catch handle cleanup.
         return Promise.reject(err);
       }
