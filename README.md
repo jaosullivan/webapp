@@ -82,6 +82,14 @@ This script:
 4. Starts/refreshes the k3s cluster in WSL2 and updates kubeconfig with the current WSL2 IP
 5. Port-forwards ArgoCD (8080→443), Grafana (3001→3000), Prometheus (9090→9090)
 6. Prints the ArgoCD admin password
+7. Auto-recreates `shared-secrets` if missing (lost on every k3s restart)
+
+To stop the environment:
+
+```powershell
+.\fullstack\shutdown-dev.ps1              # stops everything; leaves k3s running (faster restart)
+.\fullstack\shutdown-dev.ps1 -StopCluster # full shutdown including k3s in WSL2
+```
 
 ### 3. Seed demo data
 
@@ -221,6 +229,7 @@ c:\MSDE\Webapp\
 │       └── bootstrap-argocd.yml  # One-time ArgoCD setup
 ├── fullstack/
 │   ├── start-dev.ps1             # Local dev launcher
+│   ├── shutdown-dev.ps1          # Stops all dev components (reverse of start-dev.ps1)
 │   ├── seed.py                   # Demo data seeder
 │   ├── CLAUDE.md                 # AI assistant context (conventions, Do Not list)
 │   ├── frontend/                 # React 18 + Vite (Nexus dashboard)

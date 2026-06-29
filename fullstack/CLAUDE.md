@@ -49,6 +49,7 @@ fullstack/
 │   └── dependabot.yml         # Weekly updates: pip (3 services) + npm (frontend) + GitHub Actions
 ├── seed.py                    # Demo data via APIs — authenticates as admin before order/payment creation
 ├── start-dev.ps1              # One-shot: Podman + services + frontend + k3s + port-forwards
+├── shutdown-dev.ps1           # Reverse of start-dev.ps1 — stops all dev components (-StopCluster to also stop k3s)
 └── docker-compose.yml         # PostgreSQL 16 + Redis 7 for local dev (use Podman)
 ```
 
@@ -177,7 +178,9 @@ services/<name>/
 .\start-dev.ps1
 ```
 
-Starts Podman containers, all three backend services (with `INITIAL_ADMIN_EMAIL=admin@example.com`), Vite dev server, k3s cluster in WSL2, and port-forwards for ArgoCD (`:8080`), Grafana (`:3001`), and Prometheus (`:9090`).
+Starts Podman containers, all three backend services (with `INITIAL_ADMIN_EMAIL=admin@example.com`), Vite dev server, k3s cluster in WSL2, and port-forwards for ArgoCD (`:8080`), Grafana (`:3001`), and Prometheus (`:9090`). Also auto-recreates `shared-secrets` if missing.
+
+To stop everything: `.\shutdown-dev.ps1` (leaves k3s running for faster restarts) or `.\shutdown-dev.ps1 -StopCluster` (full shutdown). The script stops port-forwards, Vite, uvicorn, closes the `-NoExit` terminal windows, and stops Podman containers.
 
 ### Manual startup
 
