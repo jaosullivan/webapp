@@ -6,7 +6,7 @@ async function login(page: import("@playwright/test").Page) {
   await page.fill("#email", "admin@example.com");
   await page.fill("#password", "admin123");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL("/");
+  await page.getByRole("heading", { name: "Overview" }).waitFor({ timeout: 8000 });
 }
 
 test.describe("Dashboard", () => {
@@ -26,10 +26,10 @@ test.describe("Dashboard", () => {
   });
 
   test("renders all four stat cards", async ({ page }) => {
-    await expect(page.getByText("Users")).toBeVisible();
-    await expect(page.getByText("Orders")).toBeVisible();
-    await expect(page.getByText("Payments")).toBeVisible();
-    await expect(page.getByText("Revenue")).toBeVisible();
+    await expect(page.locator("main").getByText("Users")).toBeVisible();
+    await expect(page.locator("main").getByText("Orders")).toBeVisible();
+    await expect(page.locator("main").getByText("Payments")).toBeVisible();
+    await expect(page.locator("main").getByText("Revenue")).toBeVisible();
   });
 
   test("stat cards show numeric values after data loads", async ({ page }) => {

@@ -19,7 +19,7 @@ export function LoginPage() {
       localStorage.setItem("token", data.access_token);
       navigate("/");
     } catch {
-      setError("Invalid email or password.");
+      setError("Invalid email or password");
     } finally {
       setLoading(false);
     }

@@ -5,7 +5,7 @@ async function loginAs(page: import("@playwright/test").Page, email: string, pas
   await page.fill("#email", email);
   await page.fill("#password", password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL("/");
+  await page.getByRole("heading", { name: "Overview" }).waitFor({ timeout: 8000 });
 }
 
 test.describe("Users page — admin access", () => {

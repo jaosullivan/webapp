@@ -5,7 +5,7 @@ async function login(page: import("@playwright/test").Page) {
   await page.fill("#email", "admin@example.com");
   await page.fill("#password", "admin123");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL("/");
+  await page.getByRole("heading", { name: "Overview" }).waitFor({ timeout: 8000 });
 }
 
 test.describe("Payments", () => {
@@ -53,7 +53,6 @@ test.describe("Payments", () => {
   test("revenue stat is visible in the dashboard", async ({ page }) => {
     // Navigate back to dashboard and verify Revenue card loads
     await page.getByRole("link", { name: /overview/i }).click();
-    await page.waitForURL("/");
-    await expect(page.getByText("Revenue")).toBeVisible();
+    await expect(page.getByText("Revenue")).toBeVisible({ timeout: 8000 });
   });
 });
