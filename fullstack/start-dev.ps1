@@ -81,6 +81,19 @@ if ($LASTEXITCODE -eq 0) {
         $pw = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
         Write-Host "  ArgoCD  user: admin  password: $pw"
     }
+
+    # shared-secrets holds the JWT secret-key and is NOT persisted to disk.
+    # It is lost on every cluster restart. Without it all backend pods crash
+    # (CreateContainerConfigError) and ArgoCD shows Degraded. Auto-recreate it.
+    $secretExists = & $kubectl get secret shared-secrets -n fullstack 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  shared-secrets missing — recreating (backend pods need this to start)..."
+        $sk = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
+        & $kubectl create secret generic shared-secrets -n fullstack `
+            --from-literal="secret-key=$sk" `
+            --dry-run=client -o yaml | & $kubectl apply -f - 2>$null
+        Write-Host "  shared-secrets recreated (existing sessions will need to re-login)."
+    }
 } else {
     Write-Host "  Warning: cluster not reachable — skipping port-forwards."
 }

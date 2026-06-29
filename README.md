@@ -186,6 +186,31 @@ $env:KUBECONFIG = "C:\Users\johna\.kube\k3s-config.yaml"
 & "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe" apply -f fullstack/infra/argocd/project.yaml
 ```
 
+### ArgoCD PVC health check
+
+The k3s `local-path` StorageClass uses `WaitForFirstConsumer` volume binding — PVCs stay `Pending` until a pod actually mounts them. ArgoCD treats `Pending` PVCs as `Progressing`, causing the app to show a permanent Progressing health status even when all pods are running.
+
+`argocd-cm` has a custom Lua health check that maps PVC `Pending` → `Healthy`. This is configured by `bootstrap-argocd.yml` and survives reinstalls.
+
+To force an unbound PVC to bind immediately (e.g. after a fresh cluster), trigger the backup CronJob once:
+
+```powershell
+$env:KUBECONFIG = "C:\Users\johna\.kube\k3s-config.yaml"
+& "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe" create job -n fullstack --from=cronjob/postgres-backup postgres-backup-init
+```
+
+### After a cluster restart
+
+The `shared-secrets` Secret (JWT signing key) is not persisted to disk and is lost on every cluster restart. Without it all backend pods crash with `CreateContainerConfigError`. `start-dev.ps1` detects and auto-recreates it. To recreate manually:
+
+```powershell
+$k = "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe"
+$sk = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
+& $k create secret generic shared-secrets -n fullstack --from-literal="secret-key=$sk" --dry-run=client -o yaml | & $k apply -f -
+```
+
+Note: creating a new key invalidates all existing JWT sessions — users will need to log in again.
+
 ## Project Structure
 
 ```
@@ -228,3 +253,5 @@ See [fullstack/CLAUDE.md](fullstack/CLAUDE.md) for the full conventions referenc
 - **Do not** hardcode secrets or commit `.env` files / K8s Secret manifests with real values
 - **Do not** push images that fail the Trivy CRITICAL scan — `scan` gates `update-manifests`
 - **Do not** add new Kubernetes resource kinds to manifests without updating the ArgoCD AppProject whitelist in [fullstack/infra/argocd/project.yaml](fullstack/infra/argocd/project.yaml) — a single unlisted kind blocks the entire sync
+- **Do not** add a workload that connects to postgres without a NetworkPolicy allow rule — `default-deny-ingress` blocks all ingress; the symptom is `Connection refused` in the Alembic init container
+- **Do not** assume `shared-secrets` persists across cluster restarts — recreate it with `start-dev.ps1` or the manual command above

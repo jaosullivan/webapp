@@ -279,13 +279,19 @@ helm install ingress-nginx ingress-nginx/ingress-nginx `
 & $kubectl port-forward svc/tempo       -n fullstack 3200:3200
 ```
 
-**PostgreSQL backups**: `postgres-backup` CronJob runs daily at 02:00 UTC, dumps all three databases with `pg_dump | gzip`, retains 7 days on a 5Gi PVC.
+**NetworkPolicies** (`infra/k8s/services/network-policies.yaml`): `default-deny-ingress` blocks all pod ingress by default. Every workload needs a matching allow rule or it will be unreachable. Current allow rules: `frontend` (from ingress-nginx), `backends` (from ingress-nginx + prometheus), `postgres` (from users/orders/payments/postgres-backup on port 5432), `redis` (from backends on port 6379), plus monitoring stack rules. The `postgres-backup` CronJob pod template carries `app: postgres-backup` label so the postgres NetworkPolicy can select it.
+
+**PostgreSQL backups**: `postgres-backup` CronJob runs daily at 02:00 UTC, dumps all three databases with `pg_dump | gzip`, retains 7 days on a 5Gi PVC (`local-path`, `WaitForFirstConsumer` — binds on first pod mount).
 
 **In-cluster secrets** (apply imperatively after cluster restart — never committed to Git):
+
+`shared-secrets` is the most critical — without it all backend pods crash at startup (`CreateContainerConfigError`). `start-dev.ps1` auto-recreates it if missing. Manual recreation (PowerShell — no `openssl` needed):
+
 ```powershell
 $kubectl = "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe"
-# Shared JWT secret
-& $kubectl create secret generic shared-secrets -n fullstack --from-literal=secret-key=$(openssl rand -hex 32) --dry-run=client -o yaml | & $kubectl apply -f -
+# Shared JWT secret (generates 32 random bytes as hex using PowerShell)
+$sk = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
+& $kubectl create secret generic shared-secrets -n fullstack --from-literal="secret-key=$sk" --dry-run=client -o yaml | & $kubectl apply -f -
 # Per-service DB URLs
 @("users","orders","payments") | ForEach-Object {
   $url = "postgresql+asyncpg://postgres:postgres@postgres.fullstack.svc.cluster.local:5432/$_"
@@ -301,8 +307,9 @@ $kubectl = "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe"
 
 See `infra/docs/secret-rotation.md` for the full rotation procedure.
 
-**ArgoCD kustomize config** (already patched — survives restarts):
-- `argocd-cm` ConfigMap has `kustomize.buildOptions: --load-restrictor LoadRestrictionsNone`
+**ArgoCD kustomize config** (already patched — survives restarts via `bootstrap-argocd.yml`):
+- `argocd-cm` has `kustomize.buildOptions: --load-restrictor LoadRestrictionsNone`
+- `argocd-cm` has a custom Lua PVC health check: maps `Pending` → `Healthy` so PVCs using `WaitForFirstConsumer` (k3s `local-path` StorageClass) don't hold the app in a perpetual Progressing state. The `postgres-backup-pvc` uses this mode and only binds when a pod first mounts it. Trigger a one-off job to force binding: `kubectl create job -n fullstack --from=cronjob/postgres-backup postgres-backup-init`
 
 **ArgoCD AppProject whitelist** (`infra/argocd/project.yaml`): the `fullstack` AppProject controls which resource kinds ArgoCD is allowed to sync. Any resource kind not in `namespaceResourceWhitelist` will cause the entire sync to fail with "resource ... is not permitted in project fullstack". Current permitted kinds: `Deployment`, `Service`, `ConfigMap`, `PersistentVolumeClaim`, `Ingress`, `NetworkPolicy`, `PodDisruptionBudget`, `HorizontalPodAutoscaler`, `CronJob`. When adding new resource kinds to the manifests, update the whitelist first and apply it (`kubectl apply -f infra/argocd/project.yaml`) before pushing.
 
@@ -359,6 +366,15 @@ $wslIp = (wsl -d Ubuntu -u root -- hostname -I) -split '\s+' | Select-Object -Fi
 - Migration files follow the naming pattern `NNNN_<description>.py`.
 - `env.py` swaps `asyncpg` → `postgresql://` (psycopg2) for the sync migration runner.
 - In production, migrations run automatically via the `migrate` init container before the app starts.
+- **DuplicateTable recovery**: if the database was bootstrapped via `create_all` (e.g. after a fresh cluster) but the `alembic_version` table is missing, the init container will fail with `DuplicateTable`. Fix by stamping each database with its head revision via the postgres pod:
+  ```powershell
+  $k = "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe"
+  $pg = (& $k get pod -n fullstack -l app=postgres -o jsonpath='{.items[0].metadata.name}')
+  & $k exec -n fullstack $pg -- psql -U postgres -d users    -c "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)); DELETE FROM alembic_version; INSERT INTO alembic_version VALUES ('0002');"
+  & $k exec -n fullstack $pg -- psql -U postgres -d orders   -c "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)); DELETE FROM alembic_version; INSERT INTO alembic_version VALUES ('0001');"
+  & $k exec -n fullstack $pg -- psql -U postgres -d payments -c "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)); DELETE FROM alembic_version; INSERT INTO alembic_version VALUES ('0001');"
+  ```
+  Then delete the crashing pods so they restart and re-run migrations cleanly.
 
 ### Inter-service communication
 
@@ -457,3 +473,5 @@ Push to main
 - Do not use `page.waitForURL("/")` after login in E2E tests — use `page.getByRole("heading", { name: "Overview" }).waitFor()` instead
 - Do not reuse the module-level SQLAlchemy engine in health check handlers — create a fresh `NullPool` engine per call and dispose it in a `finally` block
 - Do not add new Kubernetes resource kinds to the production overlay without also adding them to `infra/argocd/project.yaml` `namespaceResourceWhitelist` — ArgoCD will fail the entire sync with "not permitted" and block all resources, not just the new one
+- Do not add a new workload (Deployment, CronJob, etc.) that connects to postgres without adding a corresponding NetworkPolicy rule — `default-deny-ingress` blocks all pod ingress; connection refused at the TCP level is the symptom
+- Do not use `openssl rand` in PowerShell scripts — it is not available on Windows; use `-join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })` to generate a 32-byte hex secret
