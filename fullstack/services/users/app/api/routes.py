@@ -55,7 +55,7 @@ async def create_user(request: Request, body: UserCreate, db: AsyncSession = Dep
 
 
 @router.post("/auth/token")
-@limiter.limit("20/minute")
+@limiter.limit("50/minute")
 async def login(
     request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
