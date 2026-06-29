@@ -35,6 +35,36 @@ jobs:
             -f https://raw.githubusercontent.com/argoproj/argo-cd/${{ inputs.argocd_version }}/manifests/install.yaml
           kubectl rollout status deployment/argocd-server -n argocd --timeout=120s
 
+      - name: Configure argocd-cm
+        run: |
+          kubectl patch configmap argocd-cm -n argocd --patch "$(cat <<'EOF'
+          data:
+            kustomize.buildOptions: --load-restrictor LoadRestrictionsNone
+            resource.customizations.health.PersistentVolumeClaim: |
+              hs = {}
+              if obj.status ~= nil then
+                if obj.status.phase == "Bound" then
+                  hs.status = "Healthy"
+                  hs.message = "Bound"
+                  return hs
+                end
+                if obj.status.phase == "Lost" then
+                  hs.status = "Degraded"
+                  hs.message = "Lost"
+                  return hs
+                end
+                if obj.status.phase == "Pending" then
+                  hs.status = "Healthy"
+                  hs.message = "Pending (WaitForFirstConsumer)"
+                  return hs
+                end
+              end
+              hs.status = "Progressing"
+              hs.message = "Waiting for PVC to be bound"
+              return hs
+          EOF
+          )"
+
       - name: Apply AppProject
         run: kubectl apply -f fullstack/infra/argocd/project.yaml
 
