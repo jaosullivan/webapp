@@ -175,6 +175,17 @@ push to main / PR to main
 
 Images are published to `ghcr.io/jaosullivan/webapp/<service>:<sha>` and `:latest`. The `update-manifests` job commits the new SHA tags to `fullstack/infra/k8s/overlays/production/kustomization.yaml`, triggering an ArgoCD auto-sync.
 
+### ArgoCD AppProject whitelist
+
+The `fullstack` AppProject ([fullstack/infra/argocd/project.yaml](fullstack/infra/argocd/project.yaml)) controls which Kubernetes resource kinds ArgoCD is permitted to sync. A resource kind absent from `namespaceResourceWhitelist` causes the **entire** sync to fail — not just that resource. Currently permitted: `Deployment`, `Service`, `ConfigMap`, `PersistentVolumeClaim`, `Ingress`, `NetworkPolicy`, `PodDisruptionBudget`, `HorizontalPodAutoscaler`, `CronJob`.
+
+When adding a new resource kind to the manifests, update `project.yaml` and apply it to the cluster first:
+
+```powershell
+$env:KUBECONFIG = "C:\Users\johna\.kube\k3s-config.yaml"
+& "C:\Program Files\Docker\Docker\resources\bin\kubectl.exe" apply -f fullstack/infra/argocd/project.yaml
+```
+
 ## Project Structure
 
 ```
@@ -216,3 +227,4 @@ See [fullstack/CLAUDE.md](fullstack/CLAUDE.md) for the full conventions referenc
 - **Do not** use `page.waitForURL("/")` in Playwright — use content-based heading waits instead
 - **Do not** hardcode secrets or commit `.env` files / K8s Secret manifests with real values
 - **Do not** push images that fail the Trivy CRITICAL scan — `scan` gates `update-manifests`
+- **Do not** add new Kubernetes resource kinds to manifests without updating the ArgoCD AppProject whitelist in [fullstack/infra/argocd/project.yaml](fullstack/infra/argocd/project.yaml) — a single unlisted kind blocks the entire sync

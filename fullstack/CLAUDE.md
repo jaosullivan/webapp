@@ -304,6 +304,8 @@ See `infra/docs/secret-rotation.md` for the full rotation procedure.
 **ArgoCD kustomize config** (already patched — survives restarts):
 - `argocd-cm` ConfigMap has `kustomize.buildOptions: --load-restrictor LoadRestrictionsNone`
 
+**ArgoCD AppProject whitelist** (`infra/argocd/project.yaml`): the `fullstack` AppProject controls which resource kinds ArgoCD is allowed to sync. Any resource kind not in `namespaceResourceWhitelist` will cause the entire sync to fail with "resource ... is not permitted in project fullstack". Current permitted kinds: `Deployment`, `Service`, `ConfigMap`, `PersistentVolumeClaim`, `Ingress`, `NetworkPolicy`, `PodDisruptionBudget`, `HorizontalPodAutoscaler`, `CronJob`. When adding new resource kinds to the manifests, update the whitelist first and apply it (`kubectl apply -f infra/argocd/project.yaml`) before pushing.
+
 ### Local cluster (k3s in WSL2 Ubuntu)
 
 **Kubeconfig**: `C:\Users\johna\.kube\k3s-config.yaml`  
@@ -454,3 +456,4 @@ Push to main
 - Do not add `structlog.stdlib.add_logger_name` to shared processors — `PrintLogger` has no `.name` attribute; use `add_log_level` and `TimeStamper` only
 - Do not use `page.waitForURL("/")` after login in E2E tests — use `page.getByRole("heading", { name: "Overview" }).waitFor()` instead
 - Do not reuse the module-level SQLAlchemy engine in health check handlers — create a fresh `NullPool` engine per call and dispose it in a `finally` block
+- Do not add new Kubernetes resource kinds to the production overlay without also adding them to `infra/argocd/project.yaml` `namespaceResourceWhitelist` — ArgoCD will fail the entire sync with "not permitted" and block all resources, not just the new one
