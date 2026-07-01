@@ -28,34 +28,13 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
 
-  # Container base images — NOTE: Dependabot's docker ecosystem only recognizes
-  # files named `Dockerfile`, not `Containerfile` (open issue: dependabot-core#6067).
-  # This repo intentionally uses Podman + Containerfile, so these entries are
-  # currently no-ops; kept here so they activate automatically if/when support
-  # lands. Trivy in CI (`scan` job) is the active vulnerability gate until then.
-  - package-ecosystem: docker
-    directory: /fullstack/services/users
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: docker
-    directory: /fullstack/services/orders
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: docker
-    directory: /fullstack/services/payments
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: docker
-    directory: /fullstack/frontend
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+  # NOTE: no `docker` ecosystem entries here. Dependabot can read `Containerfile`
+  # (it correctly detects available base-image updates) but cannot write to it —
+  # PR creation fails server-side with `dependency_file_not_supported` every time
+  # an update is actually found, which shows up as a recurring failed run rather
+  # than a harmless no-op. This repo intentionally uses Podman + Containerfile
+  # (not Dockerfile), so base images aren't tracked by Dependabot; Trivy in CI
+  # (`scan` job) is the active vulnerability gate for these images instead.
 
   # Frontend npm dependencies
   - package-ecosystem: npm

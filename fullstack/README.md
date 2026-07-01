@@ -55,7 +55,7 @@ Observability: Prometheus · Grafana · Loki · Tempo · Alertmanager
 **CI/CD**
 - GitHub Actions: tests → E2E (real backends) → Podman build → **Trivy CRITICAL scan** → Kustomize update → ArgoCD sync
 - Images with CRITICAL CVEs never reach production
-- Dependabot: weekly PRs for pip (3 services), npm, and GitHub Actions. Docker base images are configured too, but currently a no-op since Dependabot doesn't yet support `Containerfile` naming — Trivy covers image CVEs in the meantime.
+- Dependabot: weekly PRs for pip (3 services), npm, and GitHub Actions. No `docker` entries — Dependabot can detect Containerfile base-image updates but fails to open PRs for them (`dependency_file_not_supported`), so it's left untracked; Trivy covers image CVEs instead.
 
 ---
 
@@ -237,7 +237,7 @@ fullstack/
 │   └── docs/secret-rotation.md
 ├── .github/
 │   ├── workflows/ci.yml        # Full pipeline with Trivy scan
-│   └── dependabot.yml          # Weekly pip + npm + Actions + docker (no-op, see CLAUDE.md) updates
+│   └── dependabot.yml          # Weekly pip + npm + Actions updates
 ├── seed.py
 ├── start-dev.ps1               # Windows: everything in one command
 └── CLAUDE.md                   # AI assistant context — kept in sync

@@ -46,7 +46,7 @@ fullstack/
 │   ├── workflows/
 │   │   ├── ci.yml             # test → build → scan (Trivy) → update-manifests → ArgoCD sync
 │   │   └── bootstrap-argocd.yml
-│   └── dependabot.yml         # Weekly updates: pip (3 services) + npm (frontend) + GitHub Actions + docker (no-op, see below)
+│   └── dependabot.yml         # Weekly updates: pip (3 services) + npm (frontend) + GitHub Actions
 ├── seed.py                    # Demo data via APIs — authenticates as admin before order/payment creation
 ├── start-dev.ps1              # One-shot: Podman + services + frontend + k3s + port-forwards
 ├── shutdown-dev.ps1           # Reverse of start-dev.ps1 — stops all dev components (-StopCluster to also stop k3s)
@@ -444,7 +444,8 @@ Push to main
 - GitHub Actions versions
 - pip deps for each of the three services
 - npm deps for frontend (React ecosystem and Tailwind grouped)
-- docker base images for each Containerfile — currently a no-op: Dependabot's docker ecosystem only recognizes files named `Dockerfile`, not `Containerfile` (this repo uses Podman + Containerfile). Kept in config so it activates automatically if support lands (dependabot-core#6067). Trivy in CI is the active scan for these images until then.
+
+No `docker` ecosystem entries: Dependabot can *read* `Containerfile` (it detects available base-image updates) but can't write to it — PR creation fails server-side with `dependency_file_not_supported` whenever an update is actually found, which surfaces as a recurring failed Actions run rather than a harmless no-op. This repo intentionally uses Podman + Containerfile (not Dockerfile), so base images go untracked by Dependabot; Trivy in CI is the active vulnerability scan for these images instead.
 
 ### Image registry
 
