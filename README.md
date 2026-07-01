@@ -6,7 +6,7 @@ A microservices-based fullstack application with a React admin dashboard ("Nexus
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  React 18 + Vite (Nexus Admin Dashboard — port 3000)    │
+│  React 19 + Vite (Nexus Admin Dashboard — port 3000)    │
 └───────────────────────┬─────────────────────────────────┘
                         │ Vite proxy → /api/v1/*
         ┌───────────────┼───────────────┐
@@ -26,7 +26,7 @@ A microservices-based fullstack application with a React admin dashboard ("Nexus
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18, TypeScript, Vite, Tailwind v4, Playwright (E2E), Vitest (unit) |
+| Frontend | React 19, TypeScript 6, Vite, Tailwind v4, Playwright (E2E), Vitest (unit) |
 | Backend | FastAPI, SQLAlchemy asyncio, asyncpg, Alembic, slowapi, structlog |
 | Auth | JWT access tokens (localStorage) + HttpOnly refresh token cookie, bcrypt, Redis blocklist |
 | Database | PostgreSQL 16 (one DB per service) |
@@ -43,7 +43,7 @@ A microservices-based fullstack application with a React admin dashboard ("Nexus
 - Windows 11 with WSL2 (Ubuntu distro)
 - [Podman Desktop](https://podman-desktop.io/) — for local PostgreSQL and Redis containers
 - Python 3.11+ (path: `C:\Users\johna\AppData\Local\Programs\Python\Python314\python.exe`)
-- Node.js 24+
+- Node.js 26.4+
 - k3s installed inside the Ubuntu WSL2 distro (`sudo k3s server`)
 - kubectl at `C:\Program Files\Docker\Docker\resources\bin\kubectl.exe`
 - kubeconfig at `C:\Users\johna\.kube\k3s-config.yaml` (auto-refreshed by start-dev.ps1)
@@ -232,7 +232,7 @@ c:\MSDE\Webapp\
 │   ├── shutdown-dev.ps1          # Stops all dev components (reverse of start-dev.ps1)
 │   ├── seed.py                   # Demo data seeder
 │   ├── CLAUDE.md                 # AI assistant context (conventions, Do Not list)
-│   ├── frontend/                 # React 18 + Vite (Nexus dashboard)
+│   ├── frontend/                 # React 19 + Vite (Nexus dashboard)
 │   │   ├── src/
 │   │   │   ├── pages/            # Dashboard, Users, Orders, Payments, Login
 │   │   │   ├── components/       # Layout, Sidebar, ui/ primitives

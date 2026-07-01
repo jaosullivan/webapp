@@ -6,7 +6,7 @@
 
 ## Project Overview
 
-Kubernetes-native full-stack application with three FastAPI microservices, a React 18 admin
+Kubernetes-native full-stack application with three FastAPI microservices, a React 19 admin
 dashboard frontend, PostgreSQL + Redis persistence, and a GitHub Actions CI/CD pipeline.
 Container runtime is **Podman** (Containerfile, not Dockerfile).
 
@@ -24,7 +24,7 @@ fullstack/
 │   ├── orders/                # FastAPI — order lifecycle (port 8002)
 │   ├── payments/              # FastAPI — payment processing (port 8003)
 │   └── shared/                # Shared auth (get_current_user_id, require_admin), redis, log, middleware, tracing
-├── frontend/                  # React 18 + TypeScript + Vite admin dashboard (port 3000)
+├── frontend/                  # React 19 + TypeScript + Vite admin dashboard (port 3000)
 │   ├── e2e/                   # Playwright E2E tests (auth, dashboard, orders, users, payments)
 │   ├── nginx.conf             # nginx-unprivileged config: port 8080, asset caching, SPA fallback
 │   └── Containerfile          # Multi-stage: node builder → nginxinc/nginx-unprivileged:alpine (port 8080)
@@ -46,7 +46,7 @@ fullstack/
 │   ├── workflows/
 │   │   ├── ci.yml             # test → build → scan (Trivy) → update-manifests → ArgoCD sync
 │   │   └── bootstrap-argocd.yml
-│   └── dependabot.yml         # Weekly updates: pip (3 services) + npm (frontend) + GitHub Actions
+│   └── dependabot.yml         # Weekly updates: pip (3 services) + npm (frontend) + GitHub Actions + docker (no-op, see below)
 ├── seed.py                    # Demo data via APIs — authenticates as admin before order/payment creation
 ├── start-dev.ps1              # One-shot: Podman + services + frontend + k3s + port-forwards
 ├── shutdown-dev.ps1           # Reverse of start-dev.ps1 — stops all dev components (-StopCluster to also stop k3s)
@@ -62,7 +62,7 @@ fullstack/
 | Backend | Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2.x (async), Alembic |
 | Auth | `python-jose` HS256 JWT (15 min access + 7 day refresh), `bcrypt` (direct, not passlib) |
 | RBAC | `is_admin` User field; `require_admin` FastAPI dependency; `INITIAL_ADMIN_EMAIL` bootstrap |
-| Frontend | React 18, TypeScript 5, Vite 8, React Router v6, axios |
+| Frontend | React 19, TypeScript 6, Vite 8, React Router v7, axios |
 | UI Components | shadcn/ui (manual, no CLI) + Tailwind CSS v4 + lucide-react |
 | Primary DB | PostgreSQL 16 (`asyncpg` async, `psycopg2-binary` for Alembic migrations) |
 | Cache / Blocklist | Redis 7 — refresh token rotation + JWT blocklist (`blocklist:{token}` keys with TTL) |
@@ -168,7 +168,7 @@ services/<name>/
 ### Prerequisites
 
 - Python 3.11+ (project uses 3.14 at `C:\Users\johna\AppData\Local\Programs\Python\Python314\`)
-- Node.js 20+ at `C:\Program Files\nodejs\`
+- Node.js 26.4+ at `C:\Program Files\nodejs\`
 - Podman running with containers `fullstack-postgres` (port 5432) and `fullstack-redis` (port 6379)
 
 ### Start everything
@@ -444,6 +444,7 @@ Push to main
 - GitHub Actions versions
 - pip deps for each of the three services
 - npm deps for frontend (React ecosystem and Tailwind grouped)
+- docker base images for each Containerfile — currently a no-op: Dependabot's docker ecosystem only recognizes files named `Dockerfile`, not `Containerfile` (this repo uses Podman + Containerfile). Kept in config so it activates automatically if support lands (dependabot-core#6067). Trivy in CI is the active scan for these images until then.
 
 ### Image registry
 

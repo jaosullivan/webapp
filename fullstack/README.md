@@ -1,6 +1,6 @@
 # Fullstack — Kubernetes-Native Admin Dashboard
 
-A production-grade fullstack application: three FastAPI microservices, a React 18 admin dashboard, and a GitOps deployment pipeline. Demonstrates real-world patterns — JWT auth with refresh tokens, RBAC, structured observability, hardened Kubernetes workloads, and automated security scanning.
+A production-grade fullstack application: three FastAPI microservices, a React 19 admin dashboard, and a GitOps deployment pipeline. Demonstrates real-world patterns — JWT auth with refresh tokens, RBAC, structured observability, hardened Kubernetes workloads, and automated security scanning.
 
 ---
 
@@ -12,7 +12,7 @@ Browser → NGINX ingress (HTTPS + HSTS)
     ┌─────────┼──────────┬───────────────┐
     ▼         ▼          ▼               ▼
  frontend   users      orders        payments
- React 18   FastAPI    FastAPI       FastAPI
+ React 19   FastAPI    FastAPI       FastAPI
  :8080      :8000      :8000         :8000
               │
     ┌─────────┴──────────┐
@@ -55,7 +55,7 @@ Observability: Prometheus · Grafana · Loki · Tempo · Alertmanager
 **CI/CD**
 - GitHub Actions: tests → E2E (real backends) → Podman build → **Trivy CRITICAL scan** → Kustomize update → ArgoCD sync
 - Images with CRITICAL CVEs never reach production
-- Dependabot: weekly PRs for pip (3 services), npm, and GitHub Actions
+- Dependabot: weekly PRs for pip (3 services), npm, and GitHub Actions. Docker base images are configured too, but currently a no-op since Dependabot doesn't yet support `Containerfile` naming — Trivy covers image CVEs in the meantime.
 
 ---
 
@@ -63,7 +63,7 @@ Observability: Prometheus · Grafana · Loki · Tempo · Alertmanager
 
 ### Prerequisites
 
-- Python 3.11+, Node.js 20+
+- Python 3.11+, Node.js 26.4+
 - Podman with `fullstack-postgres` (port 5432) and `fullstack-redis` (port 6379) containers
 
 ### Windows — one-shot startup
@@ -237,7 +237,7 @@ fullstack/
 │   └── docs/secret-rotation.md
 ├── .github/
 │   ├── workflows/ci.yml        # Full pipeline with Trivy scan
-│   └── dependabot.yml          # Weekly pip + npm + Actions updates
+│   └── dependabot.yml          # Weekly pip + npm + Actions + docker (no-op, see CLAUDE.md) updates
 ├── seed.py
 ├── start-dev.ps1               # Windows: everything in one command
 └── CLAUDE.md                   # AI assistant context — kept in sync
@@ -251,7 +251,7 @@ fullstack/
 |---|---|
 | **Backend** | Python 3.11, FastAPI, SQLAlchemy 2.x async, Alembic, Pydantic v2 |
 | **Auth** | python-jose HS256, bcrypt (direct), Redis blocklist, refresh token rotation |
-| **Frontend** | React 18, TypeScript 5, Vite, React Router v6, axios, Tailwind v4, shadcn/ui |
+| **Frontend** | React 19, TypeScript 6, Vite, React Router v7, axios, Tailwind v4, shadcn/ui |
 | **Database** | PostgreSQL 16 (asyncpg), Redis 7 |
 | **Containers** | Podman, multi-stage Containerfiles, non-root uid 1001, readOnlyRootFilesystem |
 | **Orchestration** | Kubernetes (k3s locally), HPA, PDB, NetworkPolicy, cert-manager TLS |
